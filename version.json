@@ -1,0 +1,5 @@
+{
+  "version": "1.0.0",
+  "download_url": "https://github.com/yeorri/vat_auto_print/releases/latest",
+  "notes": "첫 배포 — 부가세 신고자료 6종 자동 조회·출력 (통합조회·신고용 합계표·신용카드/판매대행·현금영수증 매출입)."
+}
