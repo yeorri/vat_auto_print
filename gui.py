@@ -255,7 +255,7 @@ class App:
         self.var_year = tk.StringVar(value=s.get("year", "2026"))
         self.var_term = tk.StringVar(value=s.get("term", "1"))
         self.var_season = tk.StringVar(value=s.get("season", "확정"))
-        self.var_monthly = tk.BooleanVar(value=s.get("excel_monthly", True))
+        self.var_summary = tk.BooleanVar(value=s.get("excel_summary", True))
         # 서류 처리 모드는 저장하지 않고 항상 '인쇄'로 시작 (사용자 요청)
         self.var_mode = tk.StringVar(value="print")
         self.var_outdir = tk.StringVar(value=s.get("output_dir", ""))
@@ -414,9 +414,9 @@ class App:
                   width=110, height=32).pack(side="left", padx=(8, 0))
         row3 = tk.Frame(c2, bg=CARD)
         row3.pack(fill="x", padx=16, pady=(0, 4))
-        Toggle(row3, self.var_monthly, CARD).pack(side="left")
-        tk.Label(row3, text="판매대행 엑셀 — 월별 누계로 받기", bg=CARD, fg=INK,
-                 font=(FONT, 9)).pack(side="left", padx=(8, 0))
+        Toggle(row3, self.var_summary, CARD).pack(side="left")
+        tk.Label(row3, text="판매대행 엑셀 — 상호별 정리본 만들기 (Sheet1 정리·Sheet2 원본)",
+                 bg=CARD, fg=INK, font=(FONT, 9)).pack(side="left", padx=(8, 0))
         tk.Label(c2, text="※ 확정신고: O·1 업체는 확정만, X·0 업체는 예정+확정으로 조회\n"
                           "※ 예정신고: O·1 업체만 '예정'으로 조회, X·0 업체는 건너뜀",
                  bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
@@ -608,7 +608,7 @@ class App:
             year=self.var_year.get().strip(),
             term=self.var_term.get(),
             season=self.var_season.get(),
-            excel_monthly=self.var_monthly.get(),
+            excel_summary=self.var_summary.get(),
             output_dir=self.var_outdir.get().strip(),
             output_mode=self.var_mode.get(),
         )
@@ -618,7 +618,7 @@ class App:
             "year": self.var_year.get().strip(),
             "term": self.var_term.get(),
             "season": self.var_season.get(),
-            "excel_monthly": self.var_monthly.get(),
+            "excel_summary": self.var_summary.get(),
             "output_dir": self.var_outdir.get().strip(),
         })
 

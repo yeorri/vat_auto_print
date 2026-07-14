@@ -140,6 +140,16 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
 
         ok_xls, xls_err, saved_xls = await H.download_excel(page, trigger_dl,
                                                             out_xls, log=log)
+        if ok_xls and inp.excel_summary:
+            # 후가공: 상호별 정리본(Sheet1) + 원본(Sheet2) xlsx로 재작성 (사용자 요청)
+            from ..agency_excel import make_summary
+            rtype = effective_report_type(client, inp)
+            title = f"{inp.term}기{rtype} - {client.get('name', '')}"
+            ok_sum, err_sum, final_xls = make_summary(saved_xls, title, log=log)
+            if ok_sum:
+                saved_xls = final_xls
+            else:
+                log(f"    [!] 정리본 생성 실패({err_sum}) — 원본 엑셀 그대로 저장")
         if ok_xls:
             res.outputs.append(saved_xls)
         new_dialogs = dialogs[n1:]

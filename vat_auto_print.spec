@@ -15,7 +15,7 @@ hiddenimports = pw_hidden + [
     "pywinauto", "pywinauto.findwindows", "comtypes",
     "win32api", "win32con", "win32gui", "win32process", "win32print",
     "win32clipboard", "pywintypes",
-    "openpyxl",
+    "openpyxl", "xlrd",
 ]
 
 a = Analysis(

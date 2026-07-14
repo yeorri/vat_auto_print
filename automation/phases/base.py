@@ -22,7 +22,7 @@ class Inputs:
     term: str = "1"                 # 과세기간 기수: "1" | "2"
     season: str = "확정"             # 신고시즌: "확정"(7월/1월) | "예정"(4월/10월)
     report_type: str = "예정+확정"   # (예비) 예정신고 여부가 없는 업체용 폴백
-    excel_monthly: bool = True      # ④ 판매대행 엑셀 '월별 누계' 옵션
+    excel_summary: bool = True      # ④ 판매대행 엑셀 후가공 — 상호별 정리본(Sheet1)+원본(Sheet2)
     output_dir: str = ""            # PDF/엑셀 저장 경로 (업체별 하위 폴더 자동 생성)
     output_mode: str = "print"      # "print"(기본 프린터 출력, 디폴트) | "pdf"(저장)
 

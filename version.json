@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "download_url": "https://github.com/yeorri/vat_auto_print/releases/latest",
-  "notes": "첫 배포 — 부가세 신고자료 6종 자동 조회·출력 (통합조회·신고용 합계표·신용카드/판매대행·현금영수증 매출입)."
+  "notes": "판매대행 엑셀 정리본 자동 생성(상호별 정렬·소계·총합계, 살아있는 수식, Sheet1 정리본/Sheet2 원본). 뷰어 인쇄 안정화·속도 개선, 로그 간소화, 경과시간 표시."
 }
