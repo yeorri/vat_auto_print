@@ -9,6 +9,7 @@ from . import (
     card_sales,
     cash_purchase,
     cash_sales,
+    export_sales,
     hapgye_sum,
     vat_integrated,
 )
@@ -19,6 +20,7 @@ ALL_PHASES = [
     card_sales,       # ④ 신용카드/판매대행 (+엑셀)
     cash_sales,       # ⑤ 현금영수증 매출총액
     cash_purchase,    # ⑥ 현금영수증 매입총액
+    export_sales,     # ⑦ 수출실적명세서
 ]
 
 PHASE_BY_KEY = {p.KEY: p for p in ALL_PHASES}

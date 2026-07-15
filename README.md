@@ -16,6 +16,7 @@
 | 4 | card_sales | 신용카드/판매(결제)대행 + 엑셀 | ✅ 구현 (월별누계 라이브 확인 남음) |
 | 5 | cash_sales | 현금영수증 매출총액 | ✅ 구현 |
 | 6 | cash_purchase | 현금영수증 매입총액 | ✅ 구현 (⑤와 셀렉터 동일) |
+| 7 | export_sales | 수출실적명세서 | ✅ 구현 (예정=분기·확정 O=분기·X=반기 선택) |
 
 ### 신고시즌 × 업체별 예정신고 여부 (필수 열)
 
@@ -44,6 +45,7 @@ GUI에서 **신고시즌(확정신고/예정신고)**을 고르고, 업체별 �
 | 0602060000 | ④ 신용카드/판매대행 | edtTxprDscmNo1 / selectStlYr / selectQrtFrom·To / trigger163(조회) / trigger167(인쇄하기 → **Report 뷰어 팝업**(clipReport) → window.print()) / trigger164(판매대행 엑셀) / 자료 없으면 '조회된 결과가 없습니다' alert → 정상 생략 |
 | 0602070000 | ⑤ 현금영수증 매출 | selectYr("2026년") / selectQrt(**-전체- 고정**, 사용자 확정) / txprDscmNo1~3 / trigger1(조회) / trigger12(인쇄 → Report 뷰어 팝업) / 완료신호=총합계 행 or 무자료 문구 |
 | 0602150000 | ⑥ 현금영수증 매입 | ⑤와 완전 동일 |
+| 0602130000 | ⑦ 수출실적명세서 | inputBsno / edtYear("2026") / shpnYmGubun_input_0~2(월·분기·반기 라디오) / edtQrt(1~4분기)·edtHt(상·하반기, 라디오에 따라 전환) / trigger93(조회) / trigger167(인쇄하기, 직접 인쇄형) / 완료신호='총 N건' 줄 변화 or 무자료 문구 |
 
 - 사업자번호 오류 alert: "사업자등록번호를 확인하시기 바랍니다." → fatal 처리
 - ④⑤⑥ 무자료: alert가 아니라 **화면 그리드에 '조회된 결과가 없습니다' 문구** (라이브 확인)
