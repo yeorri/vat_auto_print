@@ -248,6 +248,7 @@ class App:
         self.session_loop: asyncio.AbstractEventLoop | None = None
         self._busy = False
         self._stop = False
+        self._run_fut = None   # 실행 중인 asyncio task — 중지 시 즉시 취소용
         self._phase_vars: dict[str, tk.BooleanVar] = {}
         self._phase_pills: dict[str, Pill] = {}
 
@@ -665,15 +666,26 @@ class App:
         def emit(kind, **kw):
             self.events.put({"kind": kind, **kw})
 
-        coro = run_all(self.session, clients_sel, selected, inp, emit,
-                       stop_check=lambda: self._stop)
-        self._run_fut = asyncio.run_coroutine_threadsafe(coro, self.session_loop)
+        async def _runner():
+            # 중지 버튼이 task를 즉시 cancel한다 — 진행 중이던 대기/조회가 그 자리에서
+            # 끊기므로 여기서 잡아 GUI 상태를 정리(done)해 준다.
+            try:
+                await run_all(self.session, clients_sel, selected, inp, emit,
+                              stop_check=lambda: self._stop)
+            except asyncio.CancelledError:
+                emit("log", text="[!] 즉시 중단됨 — 진행 중이던 작업을 끊었습니다. "
+                                 "(브라우저는 유지, 다시 시작 가능)")
+                emit("done", results=[])
+
+        self._run_fut = asyncio.run_coroutine_threadsafe(_runner(), self.session_loop)
 
     def _stop_clicked(self):
         if not self._busy:
             return
         self._stop = True
-        self._append_log("[i] 중지 요청 — 현재 단계 마무리 후 멈춥니다.")
+        if self._run_fut is not None:
+            self._run_fut.cancel()   # 진행 중인 단계까지 즉시 중단 (사용자 요청)
+        self._append_log("[i] 중지 — 즉시 중단합니다.")
 
     # ── 이벤트 처리 ──
     def _poll(self):
@@ -696,6 +708,7 @@ class App:
                         pill.set(ev.get("status", "idle"))
                 elif kind == "done":
                     self._busy = False
+                    self._run_fut = None
                     self.btn_stop.set_enabled(False)
                     self.lbl_status.config(text="완료 — 대기 중")
                     if self._run_started is not None:
@@ -781,6 +794,11 @@ class App:
     def _on_close(self):
         self._stop = True
         self._save_settings()
+        if self._run_fut is not None:
+            try:
+                self._run_fut.cancel()
+            except Exception:
+                pass
         if self.session_loop is not None and self.session is not None:
             try:
                 fut = asyncio.run_coroutine_threadsafe(
