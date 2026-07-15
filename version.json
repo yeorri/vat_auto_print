@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "download_url": "https://github.com/yeorri/vat_auto_print/releases/latest",
-  "notes": "수출실적명세서 조회·출력 추가 (예정신고 여부에 따라 분기/반기 자동 선택)."
+  "notes": "[선택 업데이트] 중지 버튼이 즉시 중단으로 바뀌었습니다(기존: 현재 단계 마무리 후 중단). 급하지 않으면 건너뛰어도 됩니다."
 }
