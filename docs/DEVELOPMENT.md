@@ -1,6 +1,6 @@
 # 개발 기록 — 부가세 신고자료 자동 출력 (VatAutoPrint)
 
-2026-07-14 하루 동안 설계→구현→라이브 검수 9회→v1.0.2 배포까지 진행한 기록.
+2026-07-14 하루 동안 설계→구현→라이브 검수 9회→v1.0.3 배포까지 진행한 기록.
 다음 개발 세션(기능 추가·버그 수정)의 참고 문서. 셀렉터·화면 사양은 README의
 "화면 정찰 결과" 표와 함께 볼 것.
 
@@ -22,6 +22,7 @@
 
 ```
 gui.py                  Tkinter GUI. 세션 이벤트루프 스레드 + queue 폴링(100ms).
+                        중지 = 실행 task 즉시 cancel(브라우저 launch는 shield 보호).
 browser_setup.py        첫 실행 시 Chromium 자동 설치(ms-playwright 공용 위치).
 updater.py              GitHub raw version.json 체크 → 새 버전 알림.
 automation/
@@ -33,7 +34,8 @@ automation/
   pdf_save.py           저장 다이얼로그 pywinauto 자동화 (원조 검증 코드 + 파라미터화)
   report.py             결과 엑셀(업체×작업 성공/실패/건너뜀/사유/산출물)
   roster.py             명부 가져오기 (업체명/사업자번호(10 또는 주민13)/예정신고 O·X)
-  phases/               base(Inputs/PhaseResult/effective_report_type) + 5개 phase
+  agency_excel.py       ④ 판매대행 엑셀 후가공 (상호별 정리본 + 원본, 수식)
+  phases/               base(Inputs/PhaseResult/effective_report_type) + 6개 phase
 tools/peek*.py          CDP(localhost:9222)로 실행 중 브라우저 상태 덤프 — 진단 필수 도구
 ```
 
@@ -154,11 +156,15 @@ tools/peek*.py          CDP(localhost:9222)로 실행 중 브라우저 상태 �
 - 조회 조건: 과세기간 [년][1기|2기][확정|예정] 한 줄. 신고구분 UI 없음(예정신고 열이 결정).
 - 서류 처리: [인쇄|PDF 저장] — 항상 '인쇄'로 시작(저장 안 함). 저장 폴더는 PDF 모드
   또는 신용카드 phase(판매대행 엑셀) 켜면 필수.
+- 중지 버튼: **즉시 중단**(v1.0.3) — 실행 task cancel로 진행 중이던 대기까지 끊음.
+  브라우저·로그인 유지, 재시작 가능. 이미 뜬 저장 다이얼로그의 1장은 저장될 수 있고
+  (별도 스레드), 즉시 중단한 실행은 결과 엑셀을 만들지 않음.
 - 로그: 진행/결과만 표시(업체 헤더 연보라 굵게, ✓/⚠/💾, 내부 동작 숨김) —
   **원본 전체는 `logs/run_*.log`에 기록**(진단은 이 파일로). 경과 타이머 ⏱.
 - 결과 엑셀: `조회결과_시각.xlsx` — 업체×작업 성공/실패/건너뜀/사유/산출물.
 - 산출물: PDF는 `저장폴더\업체명\업체명_자료명_2026년1기.pdf`,
-  판매대행 엑셀은 `업체명_판매결제대행 매출자료조회.xls`(인쇄 모드면 폴더 루트).
+  판매대행 엑셀은 `업체명_판매결제대행 매출자료조회.xlsx`(정리본 토글 ON, 기본) 또는
+  `.xls`(토글 OFF — 홈택스 원본). 인쇄 모드면 폴더 루트에 저장.
 
 ## 7. 배포 (2026-07-14)
 
@@ -166,7 +172,11 @@ tools/peek*.py          CDP(localhost:9222)로 실행 중 브라우저 상태 �
 |---|---|
 | v1.0.0 | 첫 배포 — 자료 6종(phase 5개), 예정신고 여부 기반 신고구분, 결과 엑셀 |
 | v1.0.1 | 판매대행 엑셀 정리본(수식), 뷰어 인쇄 재클릭 안정화, 속도 최적화(신호 감지), 로그 간소화+파일 기록, 경과 타이머, 신고시즌, 명부 UI 개편 |
-| v1.0.2 | ⑦ 수출실적명세서 추가 (최신) |
+| v1.0.2 | ⑦ 수출실적명세서 추가 |
+| v1.0.3 | 중지 버튼 즉시 중단(task cancel) — 선택 업데이트로 안내 (최신) |
+
+릴리즈 노트 관례: 기능 추가 없는 소규모 개선은 노트 맨 위와 version.json notes에
+"[선택 업데이트] … 급하지 않으면 건너뛰어도 됩니다"를 명시.
 
 - repo: https://github.com/yeorri/vat_auto_print (public, main) — clients.json/
   settings.json/logs/.profile은 .gitignore(PII). git identity는 repo-local 설정.
