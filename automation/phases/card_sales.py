@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from pathlib import Path
 
 from .. import hometax as H
 from .base import Inputs, PhaseResult, effective_report_type
@@ -21,7 +20,7 @@ from .base import Inputs, PhaseResult, effective_report_type
 KEY = "card_sales"
 LABEL = "신용카드/판매대행 매출"
 DOC = "신용카드매출"
-DOC_XLS = "판매대행매출"
+DOC_XLS = "판매결제대행 매출자료조회"
 URL = H.menu_url("0602060000")
 
 SEL_BIZNO = "#mf_txppWframe_edtTxprDscmNo1"    # 사업자등록번호 10자리 한 칸
@@ -117,8 +116,8 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         res.outputs.append(str(out))
 
     # ── ④ (b) 판매(결제)대행 엑셀 내려받기 ──
-    # 엑셀은 인쇄 모드여도 파일로 저장 — 인쇄 모드면 저장 폴더 바로 아래,
-    # PDF 모드면 업체 폴더 안. 파일명: "업체명_판매결제대행 매출자료조회.xlsx"
+    # 엑셀은 인쇄 모드여도 파일로 저장 — 모드와 무관하게 업체별 폴더 안.
+    # 파일명: "업체명_판매결제대행 매출자료조회_2026년1기_확정.xlsx"
     # 판매대행 표(마지막 '합계' 행)가 비어 있거나 0이면 엑셀 건너뜀.
     xls_err = ""
     agency_row = sum_rows[-1] if sum_rows else ""
@@ -127,12 +126,9 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         ok_xls = True
     elif inp.output_dir:
         n1 = len(dialogs)
-        from ..pdf_save import sanitize_filename
-        xls_dir = H.client_dir(inp, client) if inp.output_mode == "pdf" \
-            else Path(inp.output_dir)
-        xls_dir.mkdir(parents=True, exist_ok=True)
-        out_xls = H.prepare_target(xls_dir / sanitize_filename(
-            f"{client.get('name', '')}_판매결제대행 매출자료조회.xlsx"), log)
+        xls_dir = H.client_dir(inp, client)
+        out_xls = H.prepare_target(
+            xls_dir / f"{H.out_name(client, DOC_XLS, inp)}.xlsx", log)
 
         async def trigger_dl():
             if not await H.click_button(page, *BTN_XLS_AGENCY, log):

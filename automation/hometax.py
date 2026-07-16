@@ -276,15 +276,23 @@ async def wait_loaded_or_bizno_error(dialogs: list, n0: int, check_loaded,
 
 
 def client_dir(inp, client: dict) -> Path:
-    """업체별 저장 폴더: {output_dir}/{업체명} — pdf 모드에서만 호출할 것."""
+    """업체별 저장 폴더: {output_dir}/{업체명} — output_dir 지정 시에만 호출할 것.
+
+    pdf 모드의 PDF와 인쇄/pdf 모드의 판매대행 엑셀이 모두 이 폴더에 저장된다.
+    """
     d = Path(inp.output_dir) / pdf_save.sanitize_filename(client.get("name", "_"))
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def out_name(client: dict, doc_label: str, inp) -> str:
-    """저장 파일명: '업체명_자료명_2026년1기' (폴더가 업체별이라 이름 중복 안전)."""
-    base = f"{client.get('name', '')}_{doc_label}_{inp.year}년{inp.term}기"
+    """저장 파일명: '업체명_자료명_2026년1기_확정' (폴더가 업체별이라 이름 중복 안전).
+
+    끝의 신고구분은 GUI에서 고른 신고시즌(확정/예정) — 업체별 예정+확정 여부와
+    무관하게 같은 실행이면 같은 접미사(사용자 요청: 시즌 표시용).
+    """
+    base = (f"{client.get('name', '')}_{doc_label}"
+            f"_{inp.year}년{inp.term}기_{inp.season}")
     return pdf_save.sanitize_filename(base)
 
 
