@@ -15,8 +15,10 @@
 | 2·3 | hapgye_sum | (세금)계산서 신고용 합계표 — 전자세금계산서+전자계산서 × 매출·매입 | ✅ 하나의 작업으로 통합 (세트 조회) |
 | 4 | card_sales | 신용카드/판매(결제)대행 + 엑셀 | ✅ 구현 (정리본 자동 생성 — Sheet1 상호별 정리·Sheet2 원본) |
 | 5 | cash_sales | 현금영수증 매출총액 | ✅ 구현 |
-| 6 | cash_purchase | 현금영수증 매입총액 | ✅ 구현 (⑤와 셀렉터 동일) |
 | 7 | export_sales | 수출실적명세서 | ✅ 구현 (예정=분기·확정 O=분기·X=반기 선택) |
+
+※ ⑥ 현금영수증 매입총액(cash_purchase)은 v1.0.5에서 제거 (사용자 불필요 확인 —
+⑤와 셀렉터가 동일했음, 필요 시 git 이력에서 복원 가능).
 
 ### 신고시즌 × 업체별 예정신고 여부 (필수 열)
 
@@ -67,7 +69,7 @@ vat_data_auto/
     hometax.py              # 공용 — URL, 버튼 폴백클릭, 인쇄→PDF, 엑셀 다운로드
     report.py               # 결과 엑셀 작성
     pdf_save.py / util.py / roster.py
-    phases/                 # base + 6개 phase (+cash_common)
+    phases/                 # base + 5개 phase (+cash_common)
 ```
 
 ## 실행
