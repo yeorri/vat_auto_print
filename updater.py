@@ -17,7 +17,7 @@ import threading
 import urllib.request
 
 # ───── 빌드별로 갱신 ─────
-CURRENT_VERSION = "1.0.5"
+CURRENT_VERSION = "1.0.6"
 
 # ───── GitHub 호스팅 위치 ─────
 GITHUB_USER = "yeorri"

@@ -30,6 +30,27 @@ BTN_PRINT = ("#mf_txppWframe_trigger167", "인쇄하기")
 SEL_LOADED = "#mf_txppWframe_txtTxnrm"         # 조회 성공 시 '20260101-20260630' 형식
 
 
+async def _screen_empty(page) -> bool:
+    """사업자 기본사항 칸(신고유형·관할서·상호)이 전부 공란인지.
+
+    40초를 기다린 뒤라 로딩 중일 수는 없음 — 전부 공란이면 '빈 응답'으로 판정.
+    ('상호'를 th 라벨로 찾는 방식은 아래 확인 로그에서 라이브 검증된 패턴.)
+    """
+    try:
+        return await page.evaluate(
+            """() => {
+                const labels = ['신고유형', '관할서', '상호'];
+                return labels.every(lb => {
+                    const th = [...document.querySelectorAll('th')]
+                        .find(t => t.innerText.trim() === lb);
+                    const td = th && th.nextElementSibling;
+                    return !td || td.innerText.trim() === '';
+                });
+            }""")
+    except Exception:
+        return False
+
+
 async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) -> PhaseResult:
     def log(m):
         emit("log", text=m)
@@ -76,7 +97,15 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         res.reason = "사업자등록번호 오류 — 홈택스: '사업자등록번호를 확인하시기 바랍니다'"
         return res
     if state == "timeout":
-        res.reason = "조회 결과 로딩 시간 초과(40초) — 수임 미확인 여부 확인 필요"
+        # 조회 응답이 통째로 빈 화면(전 칸 공란)으로 오는 업체 존재 — 수임 문제
+        # 아님, 통합조회에 표시할 신고자료가 없는 경우 (라이브 확인 2026-07-21,
+        # 지점 사업자 2곳). 완료 신호(과세기간 칸)가 영영 안 오므로 여기로 떨어짐.
+        if await _screen_empty(page):
+            log("    조회 응답이 빈 화면 — 통합조회 자료 없는 업체로 처리")
+            res.ok = True
+            res.reason = "통합조회 결과 없음(빈 화면) — 출력 생략"
+            return res
+        res.reason = "조회 결과 로딩 시간 초과(40초)"
         return res
 
     # 상호 읽어 확인 로그 (라벨 '상호' 옆 칸)
