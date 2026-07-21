@@ -29,6 +29,11 @@ BTN_SEARCH = ("#mf_txppWframe_trigger113", "조회")
 BTN_PRINT = ("#mf_txppWframe_trigger167", "인쇄하기")
 SEL_LOADED = "#mf_txppWframe_txtTxnrm"         # 조회 성공 시 '20260101-20260630' 형식
 
+# 일부 업체(지점 등)는 조회 시 alert "조회권한이 없습니다."가 뜸 — 수임 문제 아님,
+# 통합조회 화면만 권한이 없는 경우 (라이브 확인 2026-07-21, 다른 phase는 전부 정상).
+# alert는 자동 수락돼 화면에 흔적이 없으므로 dialogs 메시지로 감지해야 함.
+NO_AUTH_KEY = "조회권한"
+
 
 async def _screen_empty(page) -> bool:
     """사업자 기본사항 칸(신고유형·관할서·상호)이 전부 공란인지.
@@ -91,15 +96,20 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         t = (await page.locator(SEL_LOADED).inner_text(timeout=1500)).strip()
         return len(t) >= 8   # '20260101-20260630'
 
-    state = await H.wait_loaded_or_bizno_error(dialogs, n0, loaded)
+    state = await H.wait_loaded_or_bizno_error(dialogs, n0, loaded,
+                                               extra_keys={"no_auth": NO_AUTH_KEY})
     if state == "bizno":
         res.fatal = True
         res.reason = "사업자등록번호 오류 — 홈택스: '사업자등록번호를 확인하시기 바랍니다'"
         return res
+    if state == "no_auth":
+        log("    홈택스: '조회권한이 없습니다' — 통합조회만 권한 없는 업체(수임 문제 아님)")
+        res.ok = True
+        res.reason = "조회권한 없음(홈택스 알림) — 출력 생략"
+        return res
     if state == "timeout":
-        # 조회 응답이 통째로 빈 화면(전 칸 공란)으로 오는 업체 존재 — 수임 문제
-        # 아님, 통합조회에 표시할 신고자료가 없는 경우 (라이브 확인 2026-07-21,
-        # 지점 사업자 2곳). 완료 신호(과세기간 칸)가 영영 안 오므로 여기로 떨어짐.
+        # 완료 신호(과세기간 칸)가 영영 안 오는 빈 응답의 예비 감지 — 주 감지는
+        # 위 no_auth alert. 화면이 전 칸 공란이면 자료 없는 업체로 처리.
         if await _screen_empty(page):
             log("    조회 응답이 빈 화면 — 통합조회 자료 없는 업체로 처리")
             res.ok = True

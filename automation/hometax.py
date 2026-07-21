@@ -254,11 +254,14 @@ def row_total(row_text: str) -> int:
 
 
 async def wait_loaded_or_bizno_error(dialogs: list, n0: int, check_loaded,
-                                     timeout_sec: float = 40) -> str:
-    """조회 클릭 후 감시 — 반환: "ok" | "bizno" | "timeout".
+                                     timeout_sec: float = 40,
+                                     extra_keys: dict | None = None) -> str:
+    """조회 클릭 후 감시 — 반환: "ok" | "bizno" | extra_keys의 상태 | "timeout".
 
     dialogs[n0:]에 사업자등록번호 오류 alert가 오면 "bizno" (업체 전체 중단 신호),
     check_loaded()(async, bool)가 True 되면 "ok".
+    extra_keys: {반환상태: alert 메시지 부분문자열} — 해당 alert 감지 시 그 상태 반환
+    (예: 통합조회의 "조회권한이 없습니다" — 자동 수락돼 화면엔 흔적이 없음).
     """
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_sec
@@ -266,6 +269,9 @@ async def wait_loaded_or_bizno_error(dialogs: list, n0: int, check_loaded,
         for m in dialogs[n0:]:
             if BIZNO_ERROR_KEY in m:
                 return "bizno"
+            for state, key in (extra_keys or {}).items():
+                if key in m:
+                    return state
         try:
             if await check_loaded():
                 return "ok"

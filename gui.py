@@ -495,6 +495,7 @@ class App:
         self.txt_log.tag_configure("client", foreground="#C4B5FD",
                                    font=(FONT, 10, "bold"))
         self.txt_log.tag_configure("ok", foreground="#4ADE80")
+        self.txt_log.tag_configure("warn", foreground="#FBBF24")
         self.txt_log.tag_configure("error", foreground="#F87171")
         self.txt_log.tag_configure("detail", foreground="#94A3B8")
         self.txt_log.tag_configure("phase", foreground="#E2E8F0",
@@ -776,7 +777,8 @@ class App:
             tag = "error"
             t = "  ⚠ " + t[3:].strip()
         elif t.startswith("[v]"):
-            tag = "ok"
+            # 성공이어도 조회권한 없음(출력 생략)은 진짜 성공과 구분되게 노란색
+            tag = "warn" if "조회권한 없음" in t else "ok"
             t = "  ✓ " + t[3:].strip()
         elif t.startswith("[i] ──"):                      # phase 시작
             tag = "phase"
