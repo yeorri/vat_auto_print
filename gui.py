@@ -1019,10 +1019,14 @@ class App:
             tag = "error"
             t = "  ⚠ " + t[3:].strip()
         elif t.startswith("[v]"):
-            # 성공이어도 출력물 없는 생략(조회권한 없음/납부서 없음)은 노란색으로 구분
-            tag = ("warn" if ("조회권한 없음" in t or "납부서 없음" in t)
-                   else "ok")
-            t = "  ✓ " + t[3:].strip()
+            # 색 구분: 실패=빨강(✗), 출력물 없는 생략(조회권한/납부서 없음)=노랑, 성공=초록
+            if "조회권한 없음" in t or "납부서 없음" in t:
+                tag, mark = "warn", "✓"
+            elif ": 실패" in t:
+                tag, mark = "error", "✗"
+            else:
+                tag, mark = "ok", "✓"
+            t = f"  {mark} " + t[3:].strip()
         elif t.startswith("[i] ──"):                      # phase 시작
             tag = "phase"
             t = "  ▷ " + t.replace("[i]", "").replace("─", "").replace("시작", "").strip()
