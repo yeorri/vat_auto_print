@@ -387,17 +387,14 @@ class App:
         bar.pack(fill="x", padx=14, pady=(4, 2))
         RButton(bar, "엑셀 가져오기", self._import_excel, kind="mini", bg=CARD,
                 width=96, height=28, font=(FONT, 9, "bold")).pack(side="left")
-        RButton(bar, "모두 체크", lambda: self._check_all(True), kind="mini", bg=CARD,
-                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(8, 0))
-        RButton(bar, "모두 해제", lambda: self._check_all(False), kind="mini", bg=CARD,
-                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
         RButton(bar, "체크 삭제", self._delete_selected, kind="mini", bg=CARD,
-                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
+                width=70, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(8, 0))
         RButton(bar, "전체 삭제", self._delete_all, kind="mini", bg=CARD,
-                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
+                width=70, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
         self.lbl_count = tk.Label(bar, text="", bg=CARD, fg=MUTE, font=(FONT, 9))
         self.lbl_count.pack(side="right")
-        tk.Label(c1, text="※ 행을 클릭하면 체크/해제 — 체크된 업체만 실행됩니다",
+        tk.Label(c1, text="※ 행 클릭 = 체크/해제, 맨 위 ✔ 헤더 클릭 = 전체 체크/해제 "
+                          "— 체크된 업체만 실행됩니다",
                  bg=CARD, fg=MUTE, font=(FONT, 8)).pack(anchor="w", padx=16, pady=(0, 4))
 
         wrap = tk.Frame(c1, bg=CARD)
@@ -410,6 +407,8 @@ class App:
                                     ("yeo", "예정신고", 60, "center")):
             self.tree.heading(col, text=txt)
             self.tree.column(col, width=w, anchor=anchor, stretch=(col == "name"))
+        # ✔ 헤더 클릭 = 전체 체크/해제 토글 (사용자 요청 — 버튼 대신 헤더로)
+        self.tree.heading("chk", command=self._toggle_all)
         # 체크된 행: 연한 파랑 배경 + ✔ (사용자 요청 — 은은하게, 하지만 한눈에)
         self.tree.tag_configure("checked", background="#DBEAFE")
         self.tree.bind("<Button-1>", self._on_tree_click)
@@ -668,6 +667,12 @@ class App:
             c["checked"] = value
         roster.save_clients(self.clients)
         self._refresh_clients()
+
+    def _toggle_all(self):
+        """✔ 헤더 클릭 — 전부 체크돼 있으면 모두 해제, 아니면 모두 체크."""
+        all_checked = bool(self.clients) and all(
+            c.get("checked", True) for c in self.clients)
+        self._check_all(not all_checked)
 
     def _add_client_inline(self):
         """명부 카드 상단 인라인 입력줄로 업체 1곳 추가."""
