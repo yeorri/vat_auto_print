@@ -269,8 +269,8 @@ class App:
             value=s.get("slip_template", "[납부서]부가가치세_{업체명}_{납부기한}"))
         self.var_slip_period = tk.StringVar(value=s.get("slip_period", "1개월"))
 
-        # 업체 명부 (clients.json) — 목록에 있는 업체는 전부 실행 대상.
-        # 행 클릭 선택은 삭제용(빼고 싶은 업체는 선택해서 삭제).
+        # 업체 명부 (clients.json) — 행 클릭 = 체크 토글, 체크된 업체만 실행 대상.
+        # (v1.1.1에서 체크박스 부활 — 큰 명부를 유지하며 그때그때 골라 실행)
         self.clients: list[dict] = roster.load_clients()
 
         self._browsers_ready = browser_setup.browsers_ready()
@@ -384,25 +384,35 @@ class App:
         e_biz.bind("<Return>", lambda e: self._add_client_inline())
 
         bar = tk.Frame(c1, bg=CARD)
-        bar.pack(fill="x", padx=14, pady=(4, 6))
+        bar.pack(fill="x", padx=14, pady=(4, 2))
         RButton(bar, "엑셀 가져오기", self._import_excel, kind="mini", bg=CARD,
                 width=96, height=28, font=(FONT, 9, "bold")).pack(side="left")
-        RButton(bar, "선택 삭제", self._delete_selected, kind="mini", bg=CARD,
-                width=70, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(8, 0))
+        RButton(bar, "모두 체크", lambda: self._check_all(True), kind="mini", bg=CARD,
+                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(8, 0))
+        RButton(bar, "모두 해제", lambda: self._check_all(False), kind="mini", bg=CARD,
+                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
+        RButton(bar, "체크 삭제", self._delete_selected, kind="mini", bg=CARD,
+                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
         RButton(bar, "전체 삭제", self._delete_all, kind="mini", bg=CARD,
-                width=70, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
+                width=66, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
         self.lbl_count = tk.Label(bar, text="", bg=CARD, fg=MUTE, font=(FONT, 9))
         self.lbl_count.pack(side="right")
+        tk.Label(c1, text="※ 행을 클릭하면 체크/해제 — 체크된 업체만 실행됩니다",
+                 bg=CARD, fg=MUTE, font=(FONT, 8)).pack(anchor="w", padx=16, pady=(0, 4))
 
         wrap = tk.Frame(c1, bg=CARD)
         wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
-        self.tree = ttk.Treeview(wrap, columns=("name", "bizno", "yeo"),
-                                 show="headings", selectmode="extended")
-        for col, txt, w, anchor in (("name", "업체명", 230, "w"),
-                                    ("bizno", "사업자등록번호", 120, "center"),
-                                    ("yeo", "예정신고", 64, "center")):
+        self.tree = ttk.Treeview(wrap, columns=("chk", "name", "bizno", "yeo"),
+                                 show="headings", selectmode="none")
+        for col, txt, w, anchor in (("chk", "✔", 34, "center"),
+                                    ("name", "업체명", 200, "w"),
+                                    ("bizno", "사업자등록번호", 116, "center"),
+                                    ("yeo", "예정신고", 60, "center")):
             self.tree.heading(col, text=txt)
             self.tree.column(col, width=w, anchor=anchor, stretch=(col == "name"))
+        # 체크된 행: 연한 파랑 배경 + ✔ (사용자 요청 — 은은하게, 하지만 한눈에)
+        self.tree.tag_configure("checked", background="#DBEAFE")
+        self.tree.bind("<Button-1>", self._on_tree_click)
         sb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -618,15 +628,46 @@ class App:
         self._refresh_clients()
         self._append_log(f"[v] 업체 명부 가져오기 — {len(rows)}곳 등록")
 
+    def _checked_clients(self) -> list[dict]:
+        """체크된 업체만 — 실행 대상. (구버전 clients.json은 checked 키가 없음 → 체크로 간주)"""
+        return [c for c in self.clients if c.get("checked", True)]
+
     def _refresh_clients(self):
         self.tree.delete(*self.tree.get_children())
         for c in self.clients:
             yeo = {True: "O", False: "X"}.get(c.get("yeojung"), "")
+            checked = c.get("checked", True)
             self.tree.insert("", "end", iid=c["bizno"],
-                             values=(c["name"], fmt_bizno(c["bizno"]), yeo))
-        self.lbl_count.config(text=f"{len(self.clients)}곳")
+                             values=("✔" if checked else "", c["name"],
+                                     fmt_bizno(c["bizno"]), yeo),
+                             tags=("checked",) if checked else ())
+        self.lbl_count.config(
+            text=f"체크 {len(self._checked_clients())} / 전체 {len(self.clients)}곳")
         self._refresh_validation()
         self._refresh_slip_preview()
+
+    def _on_tree_click(self, event):
+        """행 아무 곳이나 클릭 → 체크 토글 (사용자 요청 — 체크박스 조준 불필요)."""
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            return
+        iid = self.tree.identify_row(event.y)
+        if not iid:
+            return
+        for c in self.clients:
+            if c["bizno"] == iid:
+                c["checked"] = not c.get("checked", True)
+                break
+        roster.save_clients(self.clients)
+        self._refresh_clients()
+        return "break"
+
+    def _check_all(self, value: bool):
+        if not self.clients:
+            return
+        for c in self.clients:
+            c["checked"] = value
+        roster.save_clients(self.clients)
+        self._refresh_clients()
 
     def _add_client_inline(self):
         """명부 카드 상단 인라인 입력줄로 업체 1곳 추가."""
@@ -640,7 +681,8 @@ class App:
             messagebox.showwarning("중복", "이미 명부에 있는 사업자번호입니다.")
             return
         self.clients.append({"name": name, "bizno": bizno,
-                             "yeojung": self.v_add_yeo.get() == "O"})
+                             "yeojung": self.v_add_yeo.get() == "O",
+                             "checked": True})
         roster.save_clients(self.clients)
         self._refresh_clients()
         self._append_log(f"[v] 업체 추가: {name} ({fmt_bizno(bizno)})")
@@ -648,13 +690,13 @@ class App:
         self.v_add_bizno.set("")
 
     def _delete_selected(self):
-        sel = set(self.tree.selection())   # 행 클릭으로 선택된 업체들
+        sel = {c["bizno"] for c in self._checked_clients()}
         if not sel:
-            messagebox.showinfo("선택 삭제", "목록에서 삭제할 행을 먼저 클릭하세요.")
+            messagebox.showinfo("체크 삭제", "삭제할 업체를 먼저 체크하세요(행 클릭).")
             return
         names = [c["name"] for c in self.clients if c["bizno"] in sel]
         if not messagebox.askyesno(
-                "선택 삭제", f"{len(sel)}곳을 명부에서 삭제할까요?\n"
+                "체크 삭제", f"체크된 {len(sel)}곳을 명부에서 삭제할까요?\n"
                 + ", ".join(names[:6]) + ("…" if len(names) > 6 else "")):
             return
         self.clients = [c for c in self.clients if c["bizno"] not in sel]
@@ -695,7 +737,9 @@ class App:
     def _refresh_slip_preview(self):
         if not hasattr(self, "lbl_slip_preview"):
             return
-        sample = self.clients[0]["name"] if self.clients else "업체명"
+        chk = self._checked_clients()
+        sample = chk[0]["name"] if chk else (
+            self.clients[0]["name"] if self.clients else "업체명")
         try:
             preview = render_slip_name(
                 self.var_slip_template.get(), sample,
@@ -710,10 +754,11 @@ class App:
 
     # ── 실행 ──
     def _refresh_validation(self):
+        has_clients = bool(self._checked_clients())
         if self.var_app_mode.get() == "slip":
-            # 납부서 모드: 명부 + 저장 폴더 + 유효한 납부기한 필요
+            # 납부서 모드: 체크 업체 + 저장 폴더 + 유효한 납부기한 필요
             ready = (self._browsers_ready and not self._busy
-                     and bool(self.clients)
+                     and has_clients
                      and bool(self.var_outdir.get().strip())
                      and parse_due_date(self.var_due_date.get()) is not None)
             self.btn_start.set_enabled(ready)
@@ -723,7 +768,7 @@ class App:
                     or (self._phase_vars.get("card_sales") is not None
                         and self._phase_vars["card_sales"].get()))
         ready = (self._browsers_ready and not self._busy
-                 and bool(self.clients)
+                 and has_clients
                  and any(v.get() for k, v in self._phase_vars.items()
                          if k != "payment_slip")
                  and (not need_dir or bool(self.var_outdir.get().strip())))
@@ -767,7 +812,10 @@ class App:
         if self._busy:
             return
         slip_mode = self.var_app_mode.get() == "slip"
-        clients_sel = list(self.clients)   # 명부에 있는 업체는 전부 실행 대상
+        clients_sel = self._checked_clients()   # 체크된 업체만 실행 대상
+        if not clients_sel:
+            messagebox.showwarning("업체 체크", "실행할 업체를 체크해주세요(행 클릭).")
+            return
         if slip_mode:
             # 납부서 모드 — 신고시즌·예정신고 여부와 무관, 납부기한·템플릿만 검증
             if parse_due_date(self.var_due_date.get()) is None:
