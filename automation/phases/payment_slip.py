@@ -41,6 +41,7 @@ PERIOD_BTN = {  # 신고일자 조회기간 프리셋
     "3개월": "btnSch3Month", "6개월": "btnSch6Month", "1년": "btnSchYear",
 }
 GRID = "mf_txppWframe_UTERNAAZ0Z31_wframe_ttirnam101DVOListDes"
+COL_BIZNO = 7       # 사업자(주민)등록번호 "614-72-00086"
 COL_RECEIVED = 9    # 접수일시 "2026-07-22 19:32:23"
 COL_SLIP = 13       # 납부서 [보기] BUTTON (12는 접수증)
 
@@ -106,22 +107,28 @@ async def _wait_query_notice(page, timeout_sec: float = 25) -> tuple:
 
 
 async def _scan_rows(page) -> list:
-    """그리드 행 스캔 — [{row, received, hasSlip}] (접수일시 텍스트 기준)."""
+    """그리드 행 스캔 — [{row, bizno, received, hasSlip}].
+
+    bizno는 사업자번호 열(7)의 숫자만 — 호출부에서 업체 번호와 일치 검증
+    (번호 입력이 씹혀 전체 목록이 조회돼도 엉뚱한 업체를 절대 선택하지 않기 위함).
+    """
     try:
         return await page.evaluate(
-            """([grid, colR, colS]) => {
+            """([grid, colB, colR, colS]) => {
                 const out = [];
                 for (let i = 0; i < 200; i++) {
                     const cr = document.getElementById(grid + '_cell_' + i + '_' + colR);
                     if (!cr) break;
                     if (!cr.offsetParent) continue;
+                    const cb = document.getElementById(grid + '_cell_' + i + '_' + colB);
                     const cs = document.getElementById(grid + '_cell_' + i + '_' + colS);
                     out.push({row: i,
+                              bizno: cb ? cb.innerText.replace(/\\D/g, '') : '',
                               received: cr.innerText.trim(),
                               hasSlip: !!(cs && cs.querySelector('button'))});
                 }
                 return out;
-            }""", [GRID, COL_RECEIVED, COL_SLIP])
+            }""", [GRID, COL_BIZNO, COL_RECEIVED, COL_SLIP])
     except Exception:
         return []
 
@@ -147,6 +154,7 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     except Exception:
         res.reason = "신고내역 모달이 열리지 않음 (입력칸 미표시)"
         return res
+    await asyncio.sleep(0.7)   # 모달 초기화 안정화 (직후 입력은 WebSquare가 지움)
 
     # ── ② 조회기간 프리셋 + 사업자번호 입력 → 조회 ──
     if inp.slip_period and inp.slip_period != "1개월":   # 1개월 = 홈택스 기본값
@@ -156,12 +164,33 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
             await asyncio.sleep(0.3)
         else:
             log(f"    [!] 조회기간 '{inp.slip_period}' 버튼 클릭 실패 — 기본값으로 진행")
-    if not await H.js_fill(page, SEL_BIZNO, bizno):
-        res.reason = "사업자번호 입력 실패"
+
+    # 번호 입력 — ws_set_value(모델 직접 기록) 1순위, 값 검증 + 3회 재시도.
+    # 라이브 사고: 모달 오픈 직후 js_fill 값이 WebSquare 재초기화로 지워져
+    # 번호 없이 조회 → 수임업체 전체 목록이 떴음. 클릭도 전부 JS(스크롤 흔들림 방지).
+    filled = False
+    for attempt in (1, 2, 3):
+        if not await H.ws_set_value(page, SEL_BIZNO, bizno):
+            await H.js_fill(page, SEL_BIZNO, bizno)
+        await asyncio.sleep(0.3)
+        val = await page.evaluate(
+            """(id) => {
+                const el = document.getElementById(id);
+                return el ? el.value : '';
+            }""", SEL_BIZNO.lstrip("#"))
+        if "".join(ch for ch in val if ch.isdigit()) == bizno:
+            filled = True
+            break
+        log(f"    [!] 번호 입력이 지워짐(시도 {attempt}) — 다시 입력")
+        await asyncio.sleep(0.5)
+    if not filled:
+        res.reason = "사업자번호 입력 실패(3회) — 모달 상태 확인 필요"
         return res
-    if not await H.click_button(page, *BTN_SEARCH, log):
-        res.reason = "조회 버튼 클릭 실패"
-        return res
+
+    if not await H.js_click(page, BTN_SEARCH[0]):
+        if not await H.click_button(page, *BTN_SEARCH, log):
+            res.reason = "조회 버튼 클릭 실패"
+            return res
 
     state, msg = await _wait_query_notice(page)
     if state == "bizno":
@@ -178,8 +207,15 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     if not rows:
         res.reason = "조회 결과 없음(신고내역 0건) — 조회기간·신고 여부 확인"
         return res
-    latest = max(rows, key=lambda r: r.get("received", ""))
-    log(f"    신고내역 {len(rows)}건 — 최신 1건(접수 {latest.get('received', '?')}) "
+    # 안전장치: 사업자번호 일치 행만 — 번호 입력이 씹혀 전체 목록이 떠도
+    # 엉뚱한 업체의 납부서를 절대 출력하지 않는다 (수임전환 모달 사고의 교훈)
+    mine = [r for r in rows if r.get("bizno") == bizno]
+    if not mine:
+        res.reason = (f"조회 결과 {len(rows)}건에 해당 사업자번호 행이 없음 — "
+                      "번호 입력 실패 가능, 재실행 필요")
+        return res
+    latest = max(mine, key=lambda r: r.get("received", ""))
+    log(f"    신고내역 {len(mine)}건 — 최신 1건(접수 {latest.get('received', '?')}) "
         "납부서 출력")
     if not latest.get("hasSlip"):
         log("    납부서 [보기] 버튼 없음 — 납부할 세액 없는 신고(환급 등)로 보임")
@@ -192,6 +228,13 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     out = H.prepare_target(
         H.client_dir(inp, client) / f"{H.pdf_save.sanitize_filename(fname)}.pdf", log)
     slip_btn = f"#{GRID}_cell_{latest['row']}_{COL_SLIP} button"
+    try:   # locator 클릭의 자동 스크롤로 모달이 흔들리지 않게 미리 중앙 정렬
+        await page.evaluate(
+            """(sel) => { const el = document.querySelector(sel);
+                          if (el) el.scrollIntoView({block: 'center'}); }""",
+            slip_btn)
+    except Exception:
+        pass
     ok, err = await H.print_via_button(ctx, page, slip_btn, "보기", out, inp, log=log)
     if ok:
         res.outputs.append(str(out))
