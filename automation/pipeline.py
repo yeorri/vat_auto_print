@@ -13,16 +13,23 @@ from typing import Callable
 from playwright.async_api import async_playwright
 
 from . import browser as B
-from .phases import ALL_PHASES
+from .phases import ALL_PHASES, PHASE_BY_KEY
 from .phases.base import Inputs, PhaseResult
 
 Emit = Callable[..., None]
 
 
 def ordered_selected(selected_keys: list[str]):
-    """선택된 key를 기본 순서(ALL_PHASES)대로 정렬해 phase 모듈 리스트 반환."""
+    """선택된 key를 기본 순서(ALL_PHASES)대로 정렬해 phase 모듈 리스트 반환.
+
+    ALL_PHASES 밖의 별도 모드 phase(납부서 출력 등)는 뒤에 이어 붙인다.
+    """
     sel = set(selected_keys)
-    return [p for p in ALL_PHASES if p.KEY in sel]
+    mods = [p for p in ALL_PHASES if p.KEY in sel]
+    known = {m.KEY for m in mods}
+    mods += [PHASE_BY_KEY[k] for k in selected_keys
+             if k in PHASE_BY_KEY and k not in known]
+    return mods
 
 
 async def wait_login(page, emit: Emit,
@@ -171,7 +178,10 @@ async def run_all(session: BrowserSession, clients: list[dict],
             f"({client.get('bizno')}) ━━━━")
 
         # 예정신고기간엔 예정신고 대상(O) 업체만 처리 — 나머지는 기록만 남기고 건너뜀
-        if inp.season == "예정" and client.get("yeojung") is not True:
+        # (납부서 출력 모드는 신고시즌과 무관 — 스킵 규칙 미적용)
+        is_slip_mode = all(p.KEY == "payment_slip" for p in phases)
+        if (not is_slip_mode and inp.season == "예정"
+                and client.get("yeojung") is not True):
             log(f"[i] {client.get('name')}: 예정신고 대상 아님 — 건너뜁니다.")
             results.append(PhaseResult(
                 "season_skip", "전체", client_name=client.get("name", ""),

@@ -10,6 +10,7 @@ from . import (
     cash_sales,
     export_sales,
     hapgye_sum,
+    payment_slip,
     vat_integrated,
 )
 
@@ -22,4 +23,6 @@ ALL_PHASES = [
     # ⑥ 현금영수증 매입총액(cash_purchase)은 v1.0.5에서 제거 — 사용자 불필요 확인
 ]
 
-PHASE_BY_KEY = {p.KEY: p for p in ALL_PHASES}
+# 납부서 출력은 '자료 출력' phase 목록(ALL_PHASES = GUI 작업선택)에 넣지 않고
+# 별도 모드로만 실행 — PHASE_BY_KEY에는 포함해 pipeline이 찾을 수 있게 한다.
+PHASE_BY_KEY = {p.KEY: p for p in ALL_PHASES + [payment_slip]}

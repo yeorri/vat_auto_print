@@ -38,7 +38,8 @@ import updater
 from automation import ALL_PHASES, BrowserSession, Inputs, run_all
 from automation import roster
 from automation.browser import app_data_dir
-from automation.util import fmt_bizno, norm_regno
+from automation.util import (fmt_bizno, norm_regno, parse_due_date,
+                             render_slip_name, unknown_template_tokens)
 
 SETTINGS_PATH = app_data_dir() / "settings.json"
 
@@ -260,6 +261,13 @@ class App:
         # 서류 처리 모드는 저장하지 않고 항상 '인쇄'로 시작 (사용자 요청)
         self.var_mode = tk.StringVar(value="print")
         self.var_outdir = tk.StringVar(value=s.get("output_dir", ""))
+        # 납부서 출력 모드 (앱 모드는 저장하지 않고 항상 '자료 출력'으로 시작)
+        self.var_app_mode = tk.StringVar(value="data")   # "data" | "slip"
+        self.var_due_date = tk.StringVar(value=s.get("due_date", ""))
+        self.var_due_format = tk.StringVar(value=s.get("due_format", "YY.MM.DD"))
+        self.var_slip_template = tk.StringVar(
+            value=s.get("slip_template", "[납부서]부가가치세_{업체명}_{납부기한}"))
+        self.var_slip_period = tk.StringVar(value=s.get("slip_period", "1개월"))
 
         # 업체 명부 (clients.json) — 목록에 있는 업체는 전부 실행 대상.
         # 행 클릭 선택은 삭제용(빼고 싶은 업체는 선택해서 삭제).
@@ -267,8 +275,12 @@ class App:
 
         self._browsers_ready = browser_setup.browsers_ready()
         self._build_ui()
-        for v in (self.var_mode, self.var_outdir):
+        for v in (self.var_mode, self.var_outdir, self.var_due_date):
             v.trace_add("write", lambda *a: self._refresh_validation())
+        for v in (self.var_due_date, self.var_due_format, self.var_slip_template):
+            v.trace_add("write", lambda *a: self._refresh_slip_preview())
+        self.var_app_mode.trace_add("write", lambda *a: self._apply_app_mode())
+        self._refresh_slip_preview()
         self._refresh_clients()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(100, self._poll)
@@ -329,7 +341,7 @@ class App:
         head.pack_propagate(False)
         tk.Label(head, text="부가세 신고자료 자동 출력", bg=HEAD, fg="#FFFFFF",
                  font=(FONT, 15, "bold")).pack(side="left", padx=(22, 10), pady=16)
-        tk.Label(head, text="홈택스 세무대리 — 통합조회·합계표·신용카드·현금영수증",
+        tk.Label(head, text="홈택스 세무대리 — 통합조회·합계표·신용카드·현금영수증·납부서",
                  bg=HEAD, fg="#94A3B8", font=(FONT, 9)).pack(side="left", pady=20)
 
         main = tk.Frame(self.root, bg=BG)
@@ -423,9 +435,19 @@ class App:
                  bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
                  ).pack(anchor="w", padx=16, pady=(0, 12))
 
+        # ── 앱 모드 전환: 자료 출력 | 납부서 출력 ──
+        modebar = tk.Frame(right, bg=BG)
+        modebar.pack(fill="x", pady=(0, 10))
+        Segmented(modebar, self.var_app_mode,
+                  [("data", "자료 출력"), ("slip", "납부서 출력")],
+                  BG, width=230, height=34).pack(side="left")
+        tk.Label(modebar, text="납부서: 신고내역 조회에서 업체별 납부서 PDF 저장",
+                 bg=BG, fg=MUTE, font=(FONT, 8)).pack(side="left", padx=(10, 0))
+
         # ── ③ 작업 선택 ──
         c3 = self._card(right, "③ 작업 선택")
         c3.pack(fill="x")
+        self._c3 = c3
         for mod in ALL_PHASES:
             var = tk.BooleanVar(value=True)
             self._phase_vars[mod.KEY] = var
@@ -442,6 +464,7 @@ class App:
         # ── ④ 서류 처리 ──
         c4 = self._card(right, "④ 서류 처리")
         c4.pack(fill="x", pady=(12, 0))
+        self._c4 = c4
         r1 = tk.Frame(c4, bg=CARD)
         r1.pack(fill="x", padx=16, pady=(2, 4))
         Segmented(r1, self.var_mode, [("print", "인쇄"), ("pdf", "PDF 저장")],
@@ -461,9 +484,74 @@ class App:
         RButton(r2, "찾아보기", self._pick_outdir, kind="mini", bg=CARD,
                 width=76, height=30, font=(FONT, 9, "bold")).pack(side="left")
 
+        # ── 납부서 출력 카드 (slip 모드에서만 표시 — _apply_app_mode) ──
+        c5 = self._card(right, "납부서 출력 설정")
+        self._c5 = c5
+
+        def _slip_entry(parent, var, width=None, mono=False):
+            e = tk.Entry(parent, textvariable=var, font=((MONO if mono else FONT), 9),
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=BORDER, highlightcolor=ACCENT)
+            if width:
+                e.configure(width=width)
+            return e
+
+        s1 = tk.Frame(c5, bg=CARD)
+        s1.pack(fill="x", padx=16, pady=(2, 4))
+        tk.Label(s1, text="납부기한", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        _slip_entry(s1, self.var_due_date, width=12).pack(side="left",
+                                                          padx=(8, 4), ipady=4)
+        tk.Label(s1, text="예: 2026-07-27", bg=CARD, fg=MUTE,
+                 font=(FONT, 8)).pack(side="left", padx=(0, 14))
+        tk.Label(s1, text="날짜 형식", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        _slip_entry(s1, self.var_due_format, width=10, mono=True).pack(
+            side="left", padx=(8, 4), ipady=4)
+        tk.Label(s1, text="YYYY/YY/MM/DD 조합 (YY.MM.DD → 26.07.27)", bg=CARD,
+                 fg=MUTE, font=(FONT, 8)).pack(side="left")
+
+        s2 = tk.Frame(c5, bg=CARD)
+        s2.pack(fill="x", padx=16, pady=(4, 2))
+        tk.Label(s2, text="파일명", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        _slip_entry(s2, self.var_slip_template, mono=True).pack(
+            side="left", fill="x", expand=True, padx=(8, 0), ipady=4)
+        tk.Label(c5, text="{업체명}, {납부기한} 자리에 값이 들어가고 나머지는 그대로",
+                 bg=CARD, fg=MUTE, font=(FONT, 8)).pack(anchor="w", padx=16)
+        self.lbl_slip_preview = tk.Label(c5, text="", bg=CARD, fg=ACCENT,
+                                         font=(FONT, 9, "bold"), anchor="w")
+        self.lbl_slip_preview.pack(fill="x", padx=16, pady=(2, 6))
+
+        s3 = tk.Frame(c5, bg=CARD)
+        s3.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(s3, text="조회기간", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        Segmented(s3, self.var_slip_period,
+                  [("1주", "1주"), ("1개월", "1개월"),
+                   ("3개월", "3개월"), ("6개월", "6개월")],
+                  CARD, width=230, height=30).pack(side="left", padx=(8, 0))
+        srow = tk.Frame(c5, bg=CARD)
+        srow.pack(fill="x", padx=16, pady=3)
+        tk.Label(srow, text="납부서 출력 (최신 신고내역 1건, PDF 저장)",
+                 bg=CARD, fg=INK, font=(FONT, 10)).pack(side="left")
+        slip_pill = Pill(srow, CARD)
+        slip_pill.pack(side="right")
+        self._phase_pills["payment_slip"] = slip_pill
+
+        s4 = tk.Frame(c5, bg=CARD)
+        s4.pack(fill="x", padx=16, pady=(4, 12))
+        tk.Label(s4, text="저장 폴더", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        _slip_entry(s4, self.var_outdir).pack(side="left", fill="x", expand=True,
+                                              padx=(8, 6), ipady=5)
+        RButton(s4, "찾아보기", self._pick_outdir, kind="mini", bg=CARD,
+                width=76, height=30, font=(FONT, 9, "bold")).pack(side="left")
+
         # ── 실행 바 ──
         runbar = tk.Frame(right, bg=BG)
         runbar.pack(fill="x", pady=(12, 0))
+        self._runbar = runbar
         self.btn_start = RButton(runbar, "시작", self._start, bg=BG,
                                  width=150, height=46)
         self.btn_start.pack(side="left")
@@ -534,6 +622,7 @@ class App:
                              values=(c["name"], fmt_bizno(c["bizno"]), yeo))
         self.lbl_count.config(text=f"{len(self.clients)}곳")
         self._refresh_validation()
+        self._refresh_slip_preview()
 
     def _add_client_inline(self):
         """명부 카드 상단 인라인 입력줄로 업체 1곳 추가."""
@@ -586,15 +675,53 @@ class App:
             self.var_outdir.set(d)
             self._refresh_validation()
 
+    # ── 앱 모드 (자료 출력 / 납부서 출력) ──
+    def _apply_app_mode(self):
+        slip = self.var_app_mode.get() == "slip"
+        if slip:
+            self._c3.pack_forget()
+            self._c4.pack_forget()
+            self._c5.pack(fill="x", before=self._runbar)
+        else:
+            self._c5.pack_forget()
+            self._c3.pack(fill="x", before=self._runbar)
+            self._c4.pack(fill="x", pady=(12, 0), before=self._runbar)
+        self._refresh_validation()
+
+    def _refresh_slip_preview(self):
+        if not hasattr(self, "lbl_slip_preview"):
+            return
+        sample = self.clients[0]["name"] if self.clients else "업체명"
+        try:
+            preview = render_slip_name(
+                self.var_slip_template.get(), sample,
+                self.var_due_date.get(), self.var_due_format.get())
+        except Exception:
+            preview = ""
+        txt = f"미리보기: {preview}.pdf"
+        if (self.var_due_date.get().strip()
+                and parse_due_date(self.var_due_date.get()) is None):
+            txt += "   ⚠ 납부기한 형식 확인 (예: 2026-07-27)"
+        self.lbl_slip_preview.config(text=txt)
+
     # ── 실행 ──
     def _refresh_validation(self):
+        if self.var_app_mode.get() == "slip":
+            # 납부서 모드: 명부 + 저장 폴더 + 유효한 납부기한 필요
+            ready = (self._browsers_ready and not self._busy
+                     and bool(self.clients)
+                     and bool(self.var_outdir.get().strip())
+                     and parse_due_date(self.var_due_date.get()) is not None)
+            self.btn_start.set_enabled(ready)
+            return
         # 저장 폴더: PDF 모드이거나, 신용카드 phase(판매대행 엑셀 저장)가 켜져 있으면 필수
         need_dir = (self.var_mode.get() == "pdf"
                     or (self._phase_vars.get("card_sales") is not None
                         and self._phase_vars["card_sales"].get()))
         ready = (self._browsers_ready and not self._busy
                  and bool(self.clients)
-                 and any(v.get() for v in self._phase_vars.values())
+                 and any(v.get() for k, v in self._phase_vars.items()
+                         if k != "payment_slip")
                  and (not need_dir or bool(self.var_outdir.get().strip())))
         self.btn_start.set_enabled(ready)
 
@@ -613,6 +740,10 @@ class App:
             excel_summary=self.var_summary.get(),
             output_dir=self.var_outdir.get().strip(),
             output_mode=self.var_mode.get(),
+            due_date=self.var_due_date.get().strip(),
+            due_format=self.var_due_format.get().strip() or "YY.MM.DD",
+            slip_template=self.var_slip_template.get().strip(),
+            slip_period=self.var_slip_period.get(),
         )
 
     def _save_settings(self):
@@ -622,28 +753,51 @@ class App:
             "season": self.var_season.get(),
             "excel_summary": self.var_summary.get(),
             "output_dir": self.var_outdir.get().strip(),
+            "due_date": self.var_due_date.get().strip(),
+            "due_format": self.var_due_format.get().strip() or "YY.MM.DD",
+            "slip_template": self.var_slip_template.get().strip(),
+            "slip_period": self.var_slip_period.get(),
         })
 
     def _start(self):
         if self._busy:
             return
-        year = self.var_year.get().strip()
-        if not (year.isdigit() and len(year) == 4):
-            messagebox.showwarning("입력 확인", "과세기간 연도(4자리)를 확인해주세요.")
-            return
+        slip_mode = self.var_app_mode.get() == "slip"
         clients_sel = list(self.clients)   # 명부에 있는 업체는 전부 실행 대상
-        # 신고구분은 업체별 예정신고 여부로 결정 — 없는 업체가 있으면 시작 불가
-        missing = [c["name"] for c in clients_sel if c.get("yeojung") is None]
-        if missing:
-            head = ", ".join(missing[:8]) + ("…" if len(missing) > 8 else "")
-            messagebox.showwarning(
-                "예정신고 여부 필요",
-                f"예정신고 여부가 없는 업체가 있습니다:\n{head}\n\n"
-                "명부 엑셀에 '예정신고' 열(O/X 또는 1/0)을 채워 다시 가져오거나,\n"
-                "'직접 추가'로 등록해주세요.")
-            return
-        selected = [k for k, v in self._phase_vars.items() if v.get()]
+        if slip_mode:
+            # 납부서 모드 — 신고시즌·예정신고 여부와 무관, 납부기한·템플릿만 검증
+            if parse_due_date(self.var_due_date.get()) is None:
+                messagebox.showwarning(
+                    "입력 확인", "납부기한을 확인해주세요. 예: 2026-07-27")
+                return
+            bad = unknown_template_tokens(self.var_slip_template.get())
+            if bad:
+                messagebox.showwarning(
+                    "파일명 템플릿",
+                    "알 수 없는 항목이 있습니다: "
+                    + ", ".join("{%s}" % t for t in bad)
+                    + "\n사용 가능한 항목: {업체명}, {납부기한}")
+                return
+            selected = ["payment_slip"]
+        else:
+            year = self.var_year.get().strip()
+            if not (year.isdigit() and len(year) == 4):
+                messagebox.showwarning("입력 확인", "과세기간 연도(4자리)를 확인해주세요.")
+                return
+            # 신고구분은 업체별 예정신고 여부로 결정 — 없는 업체가 있으면 시작 불가
+            missing = [c["name"] for c in clients_sel if c.get("yeojung") is None]
+            if missing:
+                head = ", ".join(missing[:8]) + ("…" if len(missing) > 8 else "")
+                messagebox.showwarning(
+                    "예정신고 여부 필요",
+                    f"예정신고 여부가 없는 업체가 있습니다:\n{head}\n\n"
+                    "명부 엑셀에 '예정신고' 열(O/X 또는 1/0)을 채워 다시 가져오거나,\n"
+                    "'직접 추가'로 등록해주세요.")
+                return
+            selected = [k for k, v in self._phase_vars.items() if v.get()]
         inp = self._gather_inputs()
+        if slip_mode:
+            inp.output_mode = "pdf"   # 납부서는 항상 PDF 저장 (인쇄 없음)
         self._save_settings()
 
         self._busy = True
@@ -657,10 +811,15 @@ class App:
         self._refresh_validation()
         for pill in self._phase_pills.values():
             pill.set("idle")
-        self._append_log(
-            f"[i] 시작 — 업체 {len(clients_sel)}곳 × 작업 {len(selected)}종 "
-            f"/ {inp.year}년 {inp.term}기 {inp.season}신고"
-            f" · 신고구분은 업체별 예정신고 여부 적용")
+        if slip_mode:
+            self._append_log(
+                f"[i] 시작 — 납부서 출력: 업체 {len(clients_sel)}곳 "
+                f"/ 납부기한 {inp.due_date} / 조회기간 {inp.slip_period}")
+        else:
+            self._append_log(
+                f"[i] 시작 — 업체 {len(clients_sel)}곳 × 작업 {len(selected)}종 "
+                f"/ {inp.year}년 {inp.term}기 {inp.season}신고"
+                f" · 신고구분은 업체별 예정신고 여부 적용")
 
         self._ensure_session()
 

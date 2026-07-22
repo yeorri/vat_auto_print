@@ -25,6 +25,11 @@ class Inputs:
     excel_summary: bool = True      # ④ 판매대행 엑셀 후가공 — 상호별 정리본(Sheet1)+원본(Sheet2)
     output_dir: str = ""            # PDF/엑셀 저장 경로 (업체별 하위 폴더 자동 생성)
     output_mode: str = "print"      # "print"(기본 프린터 출력, 디폴트) | "pdf"(저장)
+    # ── 납부서 출력 모드 전용 (payment_slip) ──
+    due_date: str = ""              # 납부기한 (예: "2026-07-27") — GUI에서 한 번 입력
+    due_format: str = "YY.MM.DD"    # 파일명 {납부기한} 토큰 형식 (YYYY/YY/MM/DD)
+    slip_template: str = "[납부서]부가가치세_{업체명}_{납부기한}"  # 파일명 템플릿
+    slip_period: str = "1개월"      # 신고내역 조회기간 프리셋 (1주|1개월|3개월|6개월)
 
 
 def effective_report_type(client: dict, inp: Inputs) -> str:
