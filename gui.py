@@ -267,7 +267,8 @@ class App:
         self.var_due_format = tk.StringVar(value=s.get("due_format", "YY.MM.DD"))
         self.var_slip_template = tk.StringVar(
             value=s.get("slip_template", "[납부서]부가가치세_{업체명}_{납부기한}"))
-        self.var_slip_period = tk.StringVar(value=s.get("slip_period", "1개월"))
+        # 조회기간 UI는 제거(사용자 요청) — 업체별 사업자번호 조회라 홈택스 기본
+        # (최근 1개월)이면 충분. Inputs.slip_period 기본값을 그대로 쓴다.
 
         # 업체 명부 (clients.json) — 행 클릭 = 체크 토글, 체크된 업체만 실행 대상.
         # (v1.1.1에서 체크박스 부활 — 큰 명부를 유지하며 그때그때 골라 실행)
@@ -532,14 +533,6 @@ class App:
                                          font=(FONT, 9, "bold"), anchor="w")
         self.lbl_slip_preview.pack(fill="x", padx=16, pady=(2, 6))
 
-        s3 = tk.Frame(c5, bg=CARD)
-        s3.pack(fill="x", padx=16, pady=(0, 4))
-        tk.Label(s3, text="조회기간", bg=CARD, fg=MUTE,
-                 font=(FONT, 9)).pack(side="left")
-        Segmented(s3, self.var_slip_period,
-                  [("1주", "1주"), ("1개월", "1개월"),
-                   ("3개월", "3개월"), ("6개월", "6개월")],
-                  CARD, width=230, height=30).pack(side="left", padx=(8, 0))
         srow = tk.Frame(c5, bg=CARD)
         srow.pack(fill="x", padx=16, pady=3)
         tk.Label(srow, text="납부서 출력 (최신 신고내역 1건, PDF 저장)",
@@ -797,7 +790,6 @@ class App:
             due_date=self.var_due_date.get().strip(),
             due_format=self.var_due_format.get().strip() or "YY.MM.DD",
             slip_template=self.var_slip_template.get().strip(),
-            slip_period=self.var_slip_period.get(),
         )
 
     def _save_settings(self):
@@ -810,7 +802,6 @@ class App:
             "due_date": self.var_due_date.get().strip(),
             "due_format": self.var_due_format.get().strip() or "YY.MM.DD",
             "slip_template": self.var_slip_template.get().strip(),
-            "slip_period": self.var_slip_period.get(),
         })
 
     def _start(self):
@@ -871,7 +862,7 @@ class App:
         if slip_mode:
             self._append_log(
                 f"[i] 시작 — 납부서 출력: 업체 {len(clients_sel)}곳 "
-                f"/ 납부기한 {inp.due_date} / 조회기간 {inp.slip_period}")
+                f"/ 납부기한 {inp.due_date}")
         else:
             self._append_log(
                 f"[i] 시작 — 업체 {len(clients_sel)}곳 × 작업 {len(selected)}종 "
