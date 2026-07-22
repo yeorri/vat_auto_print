@@ -144,17 +144,29 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         return res
 
     # ── ① 메뉴 진입 → 신고내역 조회 모달 열기 ──
-    page = await H.goto_url(ctx, URL, log=log)
-    if not await _click_by_text(page, LINK_TEXT):
-        res.reason = f"'{LINK_TEXT}' 링크를 찾지 못함"
-        return res
-    # 모달 로딩 대기 — 사업자번호 입력칸이 보일 때까지 (최대 15초)
+    # 직전 업체 처리로 모달이 이미 열려 있으면 재진입 생략(사용자 요청 — 속도).
+    # 잔여 그리드가 남아 있어도 ③의 사업자번호 일치 선택이 오출력을 막는다.
+    page = await H.hometax_page(ctx)
+    reused = False
     try:
-        await page.locator(SEL_BIZNO).wait_for(state="visible", timeout=15000)
+        reused = await page.locator(SEL_BIZNO).is_visible()
     except Exception:
-        res.reason = "신고내역 모달이 열리지 않음 (입력칸 미표시)"
-        return res
-    await asyncio.sleep(0.7)   # 모달 초기화 안정화 (직후 입력은 WebSquare가 지움)
+        reused = False
+    if reused:
+        log("    신고내역 모달 재사용 — 바로 이어서 조회")
+        await _read_and_confirm_notice(page)   # 혹시 남은 알림 정리
+    else:
+        page = await H.goto_url(ctx, URL, log=log)
+        if not await _click_by_text(page, LINK_TEXT):
+            res.reason = f"'{LINK_TEXT}' 링크를 찾지 못함"
+            return res
+        # 모달 로딩 대기 — 사업자번호 입력칸이 보일 때까지 (최대 15초)
+        try:
+            await page.locator(SEL_BIZNO).wait_for(state="visible", timeout=15000)
+        except Exception:
+            res.reason = "신고내역 모달이 열리지 않음 (입력칸 미표시)"
+            return res
+        await asyncio.sleep(0.7)   # 모달 초기화 안정화 (직후 입력은 WebSquare가 지움)
 
     # ── ② 조회기간 프리셋 + 사업자번호 입력 → 조회 ──
     if inp.slip_period and inp.slip_period != "1개월":   # 1개월 = 홈택스 기본값
@@ -235,7 +247,16 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
             slip_btn)
     except Exception:
         pass
-    ok, err = await H.print_via_button(ctx, page, slip_btn, "보기", out, inp, log=log)
+    # 인쇄 클릭이 드물게 씹혀 저장 다이얼로그가 안 뜨는 레이스(연속 실행 라이브
+    # 확인) — 실패 시 [보기]부터 1회 재시도 (팝업은 print_via_button이 정리함)
+    ok, err = False, ""
+    for attempt in (1, 2):
+        ok, err = await H.print_via_button(ctx, page, slip_btn, "보기", out, inp,
+                                           log=log)
+        if ok or "다이얼로그" not in (err or ""):
+            break
+        log(f"    [!] 인쇄 무반응(시도 {attempt}) — 납부서 보기부터 재시도")
+        await asyncio.sleep(1.5)
     if ok:
         res.outputs.append(str(out))
     res.ok = ok

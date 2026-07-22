@@ -539,6 +539,10 @@ class App:
         slip_pill.pack(side="right")
         self._phase_pills["payment_slip"] = slip_pill
 
+        tk.Label(c5, text="※ 실행 중에는 다른 프로그램 사용을 잠시 멈춰주세요 — 저장 창이 뜨는\n"
+                          "   순간 세무사랑 등이 화면을 잡고 있으면 '인쇄 실패'가 날 수 있습니다 (자동 재시도 1회)",
+                 bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
+                 ).pack(anchor="w", padx=16, pady=(0, 2))
         s4 = tk.Frame(c5, bg=CARD)
         s4.pack(fill="x", padx=16, pady=(4, 12))
         tk.Label(s4, text="저장 폴더", bg=CARD, fg=MUTE,
