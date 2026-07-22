@@ -394,15 +394,14 @@ class App:
                 width=70, height=28, font=(FONT, 9, "bold")).pack(side="left", padx=(6, 0))
         self.lbl_count = tk.Label(bar, text="", bg=CARD, fg=MUTE, font=(FONT, 9))
         self.lbl_count.pack(side="right")
-        tk.Label(c1, text="※ 행 클릭 = 체크/해제, 맨 위 ✔ 헤더 클릭 = 전체 체크/해제 "
-                          "— 체크된 업체만 실행됩니다",
+        tk.Label(c1, text="※ 체크된 업체만 실행됩니다",
                  bg=CARD, fg=MUTE, font=(FONT, 8)).pack(anchor="w", padx=16, pady=(0, 4))
 
         wrap = tk.Frame(c1, bg=CARD)
         wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
         self.tree = ttk.Treeview(wrap, columns=("chk", "name", "bizno", "yeo"),
                                  show="headings", selectmode="none")
-        for col, txt, w, anchor in (("chk", "✔", 34, "center"),
+        for col, txt, w, anchor in (("chk", "☐", 34, "center"),
                                     ("name", "업체명", 200, "w"),
                                     ("bizno", "사업자등록번호", 116, "center"),
                                     ("yeo", "예정신고", 60, "center")):
@@ -630,9 +629,13 @@ class App:
             yeo = {True: "O", False: "X"}.get(c.get("yeojung"), "")
             checked = c.get("checked", True)
             self.tree.insert("", "end", iid=c["bizno"],
-                             values=("✔" if checked else "", c["name"],
+                             values=("☑" if checked else "☐", c["name"],
                                      fmt_bizno(c["bizno"]), yeo),
                              tags=("checked",) if checked else ())
+        # 헤더 체크박스 = 전체 상태 표시 (클릭하면 전체 토글)
+        all_checked = bool(self.clients) and all(
+            c.get("checked", True) for c in self.clients)
+        self.tree.heading("chk", text="☑" if all_checked else "☐")
         self.lbl_count.config(
             text=f"체크 {len(self._checked_clients())} / 전체 {len(self.clients)}곳")
         self._refresh_validation()
