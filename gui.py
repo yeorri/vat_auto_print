@@ -993,8 +993,9 @@ class App:
             tag = "error"
             t = "  ⚠ " + t[3:].strip()
         elif t.startswith("[v]"):
-            # 성공이어도 조회권한 없음(출력 생략)은 진짜 성공과 구분되게 노란색
-            tag = "warn" if "조회권한 없음" in t else "ok"
+            # 성공이어도 출력물 없는 생략(조회권한 없음/납부서 없음)은 노란색으로 구분
+            tag = ("warn" if ("조회권한 없음" in t or "납부서 없음" in t)
+                   else "ok")
             t = "  ✓ " + t[3:].strip()
         elif t.startswith("[i] ──"):                      # phase 시작
             tag = "phase"
