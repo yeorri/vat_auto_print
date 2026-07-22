@@ -399,16 +399,20 @@ class App:
 
         wrap = tk.Frame(c1, bg=CARD)
         wrap.pack(fill="both", expand=True, padx=14, pady=(0, 12))
-        self.tree = ttk.Treeview(wrap, columns=("chk", "name", "bizno", "yeo"),
-                                 show="headings", selectmode="none")
-        for col, txt, w, anchor in (("chk", "☐", 34, "center"),
-                                    ("name", "업체명", 200, "w"),
+        # 체크박스는 폰트 글리프(☑) 대신 직접 그린 이미지 — Treeview는 셀 위젯이
+        # 없어서 #0(트리) 열에 아이템 이미지로 넣는 방식이 가장 깔끔하다.
+        self._cb_imgs = {s: self._make_checkbox_img(s)
+                         for s in ("on", "off", "partial")}
+        self.tree = ttk.Treeview(wrap, columns=("name", "bizno", "yeo"),
+                                 show="tree headings", selectmode="none")
+        self.tree.column("#0", width=40, stretch=False, anchor="center")
+        self.tree.heading("#0", image=self._cb_imgs["off"],
+                          command=self._toggle_all)
+        for col, txt, w, anchor in (("name", "업체명", 200, "w"),
                                     ("bizno", "사업자등록번호", 116, "center"),
                                     ("yeo", "예정신고", 60, "center")):
             self.tree.heading(col, text=txt)
             self.tree.column(col, width=w, anchor=anchor, stretch=(col == "name"))
-        # ✔ 헤더 클릭 = 전체 체크/해제 토글 (사용자 요청 — 버튼 대신 헤더로)
-        self.tree.heading("chk", command=self._toggle_all)
         # 체크된 행: 연한 파랑 배경 + ✔ (사용자 요청 — 은은하게, 하지만 한눈에)
         self.tree.tag_configure("checked", background="#DBEAFE")
         self.tree.bind("<Button-1>", self._on_tree_click)
@@ -619,6 +623,33 @@ class App:
         self._refresh_clients()
         self._append_log(f"[v] 업체 명부 가져오기 — {len(rows)}곳 등록")
 
+    def _make_checkbox_img(self, state: str) -> tk.PhotoImage:
+        """체크박스 픽셀 이미지 — on(파란 채움+흰 체크) / off(흰 채움+회색 테두리)
+        / partial(파란 채움+흰 막대, 헤더 '일부 체크' 표시용)."""
+        n = 18
+        im = tk.PhotoImage(width=n, height=n)
+        blue, border, white = "#3B82F6", "#94A3B8", "#FFFFFF"
+        if state == "off":
+            im.put(white, to=(0, 0, n, n))
+            for i in range(n):
+                for x, y in ((i, 0), (i, n - 1), (0, i), (n - 1, i)):
+                    im.put(border, (x, y))
+        else:
+            im.put(blue, to=(0, 0, n, n))
+        # 모서리 3픽셀 투명 처리 — 둥근 느낌
+        for cx, cy in ((0, 0), (0, n - 1), (n - 1, 0), (n - 1, n - 1)):
+            for dx, dy in ((0, 0), (1, 0), (0, 1)):
+                x = cx + dx if cx == 0 else cx - dx
+                y = cy + dy if cy == 0 else cy - dy
+                im.transparency_set(x, y, True)
+        if state == "on":       # 체크 마크 (2px 획: ↘ 내려갔다 ↗ 올라감)
+            for x, y in ((4, 8), (5, 9), (6, 10), (7, 11),
+                         (8, 10), (9, 9), (10, 8), (11, 7), (12, 6), (13, 5)):
+                im.put(white, to=(x, y, x + 2, y + 2))
+        elif state == "partial":   # 가로 막대
+            im.put(white, to=(4, 8, 14, 10))
+        return im
+
     def _checked_clients(self) -> list[dict]:
         """체크된 업체만 — 실행 대상. (구버전 clients.json은 checked 키가 없음 → 체크로 간주)"""
         return [c for c in self.clients if c.get("checked", True)]
@@ -628,22 +659,23 @@ class App:
         for c in self.clients:
             yeo = {True: "O", False: "X"}.get(c.get("yeojung"), "")
             checked = c.get("checked", True)
-            self.tree.insert("", "end", iid=c["bizno"],
-                             values=("☑" if checked else "☐", c["name"],
-                                     fmt_bizno(c["bizno"]), yeo),
+            self.tree.insert("", "end", iid=c["bizno"], text="",
+                             image=self._cb_imgs["on" if checked else "off"],
+                             values=(c["name"], fmt_bizno(c["bizno"]), yeo),
                              tags=("checked",) if checked else ())
-        # 헤더 체크박스 = 전체 상태 표시 (클릭하면 전체 토글)
-        all_checked = bool(self.clients) and all(
-            c.get("checked", True) for c in self.clients)
-        self.tree.heading("chk", text="☑" if all_checked else "☐")
+        # 헤더 체크박스 = 전체 상태 표시 (클릭하면 전체 토글): 전부 ☑ / 일부 ─ / 없음 ☐
+        n_chk = len(self._checked_clients())
+        head = ("on" if self.clients and n_chk == len(self.clients)
+                else "partial" if n_chk else "off")
+        self.tree.heading("#0", image=self._cb_imgs[head])
         self.lbl_count.config(
-            text=f"체크 {len(self._checked_clients())} / 전체 {len(self.clients)}곳")
+            text=f"체크 {n_chk} / 전체 {len(self.clients)}곳")
         self._refresh_validation()
         self._refresh_slip_preview()
 
     def _on_tree_click(self, event):
         """행 아무 곳이나 클릭 → 체크 토글 (사용자 요청 — 체크박스 조준 불필요)."""
-        if self.tree.identify_region(event.x, event.y) != "cell":
+        if self.tree.identify_region(event.x, event.y) not in ("cell", "tree"):
             return
         iid = self.tree.identify_row(event.y)
         if not iid:
