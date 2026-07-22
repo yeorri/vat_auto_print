@@ -1,14 +1,16 @@
 """납부서 출력 — 신고/납부 > 부가가치세 > 신고내역 조회(접수증·납부서).
 
-흐름 (2026-07-22 사용자 스크린샷 기반 — ⚠ 셀렉터는 라이브 미검증, 텍스트 탐색 방식):
-    메뉴 진입 → '신고내역 조회(접수증·납부서)' 클릭 → 큰 모달
-    → 사업자등록번호 입력(+조회기간 프리셋) → [조회]
-    → '알림: 조회가 완료되었습니다' DOM 모달 → 확인 클릭
-    → 최신 1건 행의 납부서 [보기] → Report 뷰어 팝업 → PDF 저장(업체 폴더)
+흐름 (2026-07-22 CDP 라이브 정찰로 셀렉터 확인):
+    메뉴 진입 → '신고내역 조회(접수증·납부서)' 링크 → 큰 모달(UTERNAAZ0Z31)
+    → (조회기간 프리셋) → 사업자등록번호 입력(⚠ type=password 칸) → [조회]
+    → '조회가 완료되었습니다' 알림(WebSquare 레이어 info*_wframe, 네이티브 alert 아님)
+      → btn_confirm 클릭
+    → 그리드(ttirnam101DVOListDes) 최신 행(열9=접수일시)의 열13 납부서 [보기] BUTTON
+    → Report 뷰어 팝업(clipreport.do, 창 재사용됨) → 기존 인쇄→PDF 파이프라인
 
-주의: 이 화면의 알림은 네이티브 alert가 아니라 WebSquare DOM 모달(알림/확인 버튼)
-— dialogs 자동수락에 안 잡히므로 DOM에서 직접 감지·확인 클릭한다.
-사업자번호 오류('…확인하세요' 알림)는 해당 업체만 건너뛰고 기록.
+사업자번호 오류는 같은 알림 레이어에 "…확인하세요" 메시지 — 해당 업체만 건너뜀.
+알림 확인 클릭은 반드시 해당 레이어 안의 btn_confirm으로 — 화면의 다른 '확인'
+버튼(trigger6, 조회건수)을 누르면 재조회가 일어난다(정찰에서 실확인).
 
 파일명: Inputs.slip_template의 {업체명}/{납부기한} 치환 (util.render_slip_name).
 """
@@ -29,8 +31,21 @@ URL = ("https://hometax.go.kr/websquare/websquare.html"
        "&tm3lIdx=0405010000")
 
 LINK_TEXT = "신고내역 조회(접수증·납부서)"
-DONE_TEXT = "조회가 완료되었습니다"
-BIZNO_ERR_TEXT = "확인하세요"          # "사업자등록번호/주민등록번호을(를) 확인하세요."
+
+# ── 모달 셀렉터 (2026-07-22 CDP 정찰 확인) ──
+PRE = "#mf_txppWframe_UTERNAAZ0Z31_wframe_"
+SEL_BIZNO = f"{PRE}input_txprRgtNo_UTERNAAZ31"      # ⚠ type=password
+BTN_SEARCH = (f"{PRE}trigger70_UTERNAAZ31", "조회")
+PERIOD_BTN = {  # 신고일자 조회기간 프리셋
+    "당일": "btnSchDay", "1주": "btnSchWeek", "1개월": "btnSch1Month",
+    "3개월": "btnSch3Month", "6개월": "btnSch6Month", "1년": "btnSchYear",
+}
+GRID = "mf_txppWframe_UTERNAAZ0Z31_wframe_ttirnam101DVOListDes"
+COL_RECEIVED = 9    # 접수일시 "2026-07-22 19:32:23"
+COL_SLIP = 13       # 납부서 [보기] BUTTON (12는 접수증)
+
+DONE_TEXT = "조회가 완료"
+BIZNO_ERR_TEXT = "확인하세요"    # "사업자등록번호/주민등록번호을(를) 확인하세요."
 
 
 async def _click_by_text(page, text: str) -> bool:
@@ -55,108 +70,20 @@ async def _click_by_text(page, text: str) -> bool:
         return False
 
 
-async def _tag_modal(page) -> dict:
-    """신고내역 모달 안의 구성요소를 찾아 data-vap 속성으로 태깅.
-
-    반환: {"bizno": bool, "search": bool, "periods": [...]} — 발견 여부 로그용.
-    셀렉터 id를 모르는 상태라 라벨/텍스트 기반 탐색 (라이브 검증 대상).
-    """
+async def _read_and_confirm_notice(page) -> str:
+    """WebSquare 알림 레이어(info*_wframe) 감지 — 메시지 반환 + 그 레이어의
+    btn_confirm 클릭. 없으면 ''. (다른 '확인' 버튼은 절대 누르지 않는다.)"""
     try:
         return await page.evaluate(
             """() => {
-                const vis = el => !!el.offsetParent;
-                const ownText = el => [...el.childNodes]
-                    .filter(c => c.nodeType === 3)
-                    .map(c => c.textContent).join('').trim();
-                // ① 사업자등록번호 입력칸 — 라벨 텍스트를 포함한 조상 5단계 내의
-                //    보이는 text input
-                let biznoInput = null;
-                for (const inp of document.querySelectorAll(
-                        "input[type=text], input:not([type])")) {
-                    if (!vis(inp)) continue;
-                    let node = inp;
-                    for (let i = 0; i < 5 && node; i++) {
-                        node = node.parentElement;
-                        if (node && node.innerText &&
-                            node.innerText.includes('사업자등록번호/') &&
-                            node.innerText.length < 400) {
-                            biznoInput = inp;
-                            break;
-                        }
-                    }
-                    if (biznoInput) break;
-                }
-                if (biznoInput) biznoInput.setAttribute('data-vap', 'slip_bizno');
-                // ② 모달 루트 — 입력칸에서 위로 올라가며 팝업창 컨테이너 추정
-                let root = document.body;
-                if (biznoInput) {
-                    let node = biznoInput;
-                    while (node && node !== document.body) {
-                        const cls = node.className || '';
-                        const id = node.id || '';
-                        if (String(cls).includes('w2window') ||
-                            id.includes('wframe')) { root = node; break; }
-                        node = node.parentElement;
-                    }
-                }
-                root.setAttribute('data-vap-root', '1');
-                // ③ 조회 버튼 — 모달 루트 안 텍스트/value '조회'
-                let search = null;
-                for (const el of root.querySelectorAll(
-                        "a, button, input[type=button], input[type=submit]")) {
-                    if (!vis(el)) continue;
-                    const t = (el.value || ownText(el) || el.innerText || '').trim();
-                    if (t === '조회') search = el;   // 마지막 것 사용
-                }
-                if (search) search.setAttribute('data-vap', 'slip_search');
-                // ④ 조회기간 프리셋 버튼 (당일/1주/1개월/3개월/6개월/1년)
-                const periods = [];
-                for (const el of root.querySelectorAll(
-                        "a, button, input[type=button], span, li")) {
-                    if (!vis(el)) continue;
-                    const t = (el.value || ownText(el) || '').trim();
-                    if (['당일','1주','1개월','3개월','6개월','1년'].includes(t)) {
-                        el.setAttribute('data-vap', 'slip_period_' + t);
-                        periods.push(t);
-                    }
-                }
-                return {bizno: !!biznoInput, search: !!search, periods};
-            }""")
-    except Exception:
-        return {"bizno": False, "search": False, "periods": []}
-
-
-async def _dismiss_notice(page) -> str:
-    """WebSquare '알림' DOM 모달 감지 — 있으면 확인 클릭 후 메시지 반환, 없으면 ''."""
-    try:
-        return await page.evaluate(
-            """() => {
-                const vis = el => !!el.offsetParent;
-                // 알림 레이어: '조회가 완료' 또는 '확인하세요' 텍스트가 보이는 노드
-                for (const key of ['조회가 완료되었습니다', '확인하세요',
-                                   '없습니다']) {
-                    for (const el of document.querySelectorAll('div, span, p, td')) {
-                        if (!vis(el)) continue;
-                        const own = [...el.childNodes].filter(c => c.nodeType === 3)
-                            .map(c => c.textContent).join('').trim();
-                        if (!own.includes(key)) continue;
-                        // 알림 컨테이너에서 '확인' 버튼을 찾아 클릭
-                        let node = el;
-                        for (let i = 0; i < 8 && node; i++) {
-                            const btns = [...node.querySelectorAll(
-                                "a, button, input[type=button]")].filter(b => {
-                                    const t = (b.value || b.innerText || '').trim();
-                                    return vis(b) && t === '확인';
-                                });
-                            if (btns.length) {
-                                btns[btns.length - 1].dispatchEvent(
-                                    new MouseEvent('click', {bubbles: true}));
-                                return own;
-                            }
-                            node = node.parentElement;
-                        }
-                        return own;   // 확인 버튼 못 찾아도 메시지는 보고
-                    }
+                for (const root of document.querySelectorAll(
+                        "div[id^='mf_txppWframe_UTERNAAZ0Z31_wframe_info']")) {
+                    if (!root.id.endsWith('_wframe') || !root.offsetParent) continue;
+                    const msg = (root.innerText || '').replace(/\\s+/g, ' ').trim();
+                    const btn = root.querySelector("input[id$='btn_confirm']");
+                    if (btn) btn.dispatchEvent(
+                        new MouseEvent('click', {bubbles: true}));
+                    return msg.slice(0, 120);
                 }
                 return '';
             }""")
@@ -164,73 +91,39 @@ async def _dismiss_notice(page) -> str:
         return ""
 
 
-async def _wait_query_result(page, dialogs, n0, timeout_sec: float = 25) -> tuple:
-    """조회 후 감시 — ('done'|'bizno'|'timeout', 알림메시지).
-
-    DOM '알림' 모달(주 경로)과 네이티브 alert(dialogs, 예비) 둘 다 감시.
-    """
+async def _wait_query_notice(page, timeout_sec: float = 25) -> tuple:
+    """조회 후 알림 레이어 감시 — ('done'|'bizno'|'timeout', 메시지)."""
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_sec
     while loop.time() < deadline:
-        msg = await _dismiss_notice(page)
-        if not msg:
-            for m in dialogs[n0:]:
-                if DONE_TEXT in m or BIZNO_ERR_TEXT in m:
-                    msg = m
-                    break
+        msg = await _read_and_confirm_notice(page)
         if msg:
             if BIZNO_ERR_TEXT in msg and "등록번호" in msg:
                 return "bizno", msg
-            if DONE_TEXT in msg:
-                return "done", msg
-            # 그 외 알림(예: '조회된 결과가 없습니다')도 done으로 — 건수로 재판정
-            return "done", msg
+            return "done", msg   # '조회가 완료' 외 알림도 건수로 재판정
         await asyncio.sleep(0.4)
     return "timeout", ""
 
 
-async def _pick_latest_slip_button(page) -> dict:
-    """조회 결과 그리드에서 최신 1건 행의 납부서 [보기] 버튼을 태깅.
-
-    행마다 '보기'가 2개(접수증/납부서) — 헤더 순서상 납부서가 뒤이므로 행의
-    마지막 '보기'를 납부서로 본다 (⚠ 라이브 검증 대상).
-    최신 행: 행 텍스트의 접수일시(YYYY-MM-DD…)가 가장 큰 행, 없으면 첫 행.
-    반환: {"count": 행 수, "picked": bool, "rowText": 선택 행 요약}
-    """
+async def _scan_rows(page) -> list:
+    """그리드 행 스캔 — [{row, received, hasSlip}] (접수일시 텍스트 기준)."""
     try:
         return await page.evaluate(
-            """() => {
-                const vis = el => !!el.offsetParent;
-                const rows = [];
-                const seen = new Set();
-                for (const el of document.querySelectorAll(
-                        "a, button, input[type=button], span")) {
-                    if (!vis(el)) continue;
-                    const t = (el.value || el.innerText || '').trim();
-                    if (t !== '보기') continue;
-                    const tr = el.closest('tr');
-                    if (!tr || seen.has(tr)) continue;
-                    seen.add(tr);
-                    const btns = [...tr.querySelectorAll(
-                        "a, button, input[type=button], span")].filter(b =>
-                            vis(b) && (b.value || b.innerText || '').trim() === '보기');
-                    rows.push({tr, btns, text: tr.innerText.replace(/\\s+/g, ' ')});
+            """([grid, colR, colS]) => {
+                const out = [];
+                for (let i = 0; i < 200; i++) {
+                    const cr = document.getElementById(grid + '_cell_' + i + '_' + colR);
+                    if (!cr) break;
+                    if (!cr.offsetParent) continue;
+                    const cs = document.getElementById(grid + '_cell_' + i + '_' + colS);
+                    out.push({row: i,
+                              received: cr.innerText.trim(),
+                              hasSlip: !!(cs && cs.querySelector('button'))});
                 }
-                if (!rows.length) return {count: 0, picked: false, rowText: ''};
-                const ts = txt => {
-                    const m = txt.match(/20\\d{2}[-./]\\d{2}[-./]\\d{2}[^ ]*/g);
-                    return m ? m[m.length - 1] : '';
-                };
-                rows.sort((a, b) => ts(b.text).localeCompare(ts(a.text)));
-                const row = rows[0];
-                const btn = row.btns[row.btns.length - 1];   // 마지막 '보기' = 납부서
-                btn.setAttribute('data-vap', 'slip_view');
-                return {count: rows.length, picked: true,
-                        rowText: row.text.slice(0, 120),
-                        btnsInRow: row.btns.length};
-            }""")
+                return out;
+            }""", [GRID, COL_RECEIVED, COL_SLIP])
     except Exception:
-        return {"count": 0, "picked": False, "rowText": ""}
+        return []
 
 
 async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) -> PhaseResult:
@@ -248,50 +141,29 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     if not await _click_by_text(page, LINK_TEXT):
         res.reason = f"'{LINK_TEXT}' 링크를 찾지 못함"
         return res
-    await asyncio.sleep(2.0)   # 모달 로딩
-
-    found = await _tag_modal(page)
-    if not found.get("bizno") or not found.get("search"):
-        res.reason = (f"모달 구성요소 탐색 실패 (입력칸 {found.get('bizno')}, "
-                      f"조회버튼 {found.get('search')}) — 셀렉터 확인 필요")
+    # 모달 로딩 대기 — 사업자번호 입력칸이 보일 때까지 (최대 15초)
+    try:
+        await page.locator(SEL_BIZNO).wait_for(state="visible", timeout=15000)
+    except Exception:
+        res.reason = "신고내역 모달이 열리지 않음 (입력칸 미표시)"
         return res
 
     # ── ② 조회기간 프리셋 + 사업자번호 입력 → 조회 ──
     if inp.slip_period and inp.slip_period != "1개월":   # 1개월 = 홈택스 기본값
-        try:
-            await page.locator(
-                f"[data-vap=slip_period_{inp.slip_period}]").first.click(timeout=3000)
+        btn = PERIOD_BTN.get(inp.slip_period)
+        if btn and await H.js_click(page, f"{PRE}{btn}_UTERNAAZ31"):
             log(f"    조회기간: {inp.slip_period}")
             await asyncio.sleep(0.3)
-        except Exception:
+        else:
             log(f"    [!] 조회기간 '{inp.slip_period}' 버튼 클릭 실패 — 기본값으로 진행")
-    try:
-        ok_fill = await page.evaluate(
-            """(v) => {
-                const el = document.querySelector('[data-vap=slip_bizno]');
-                if (!el) return false;
-                el.focus();
-                el.value = v;
-                el.dispatchEvent(new Event('input', {bubbles: true}));
-                el.dispatchEvent(new Event('change', {bubbles: true}));
-                el.blur();
-                return el.value === v;
-            }""", bizno)
-        if not ok_fill:
-            res.reason = "사업자번호 입력 실패"
-            return res
-    except Exception as e:
-        res.reason = f"사업자번호 입력 예외: {str(e)[:80]}"
+    if not await H.js_fill(page, SEL_BIZNO, bizno):
+        res.reason = "사업자번호 입력 실패"
         return res
-
-    n0 = len(dialogs)
-    try:
-        await page.locator("[data-vap=slip_search]").first.click(timeout=5000)
-    except Exception:
+    if not await H.click_button(page, *BTN_SEARCH, log):
         res.reason = "조회 버튼 클릭 실패"
         return res
 
-    state, msg = await _wait_query_result(page, dialogs, n0)
+    state, msg = await _wait_query_notice(page)
     if state == "bizno":
         log(f"    홈택스: {msg[:60]} — 이 업체는 건너뜁니다")
         res.reason = "사업자등록번호 오류 — 홈택스 알림, 건너뜀"
@@ -302,24 +174,25 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     await asyncio.sleep(1.0)   # 알림 닫힘 + 그리드 렌더 여유
 
     # ── ③ 최신 1건의 납부서 [보기] → Report 뷰어 → PDF 저장 ──
-    picked = await _pick_latest_slip_button(page)
-    if not picked.get("count"):
+    rows = await _scan_rows(page)
+    if not rows:
         res.reason = "조회 결과 없음(신고내역 0건) — 조회기간·신고 여부 확인"
         return res
-    if not picked.get("picked"):
-        res.reason = "납부서 [보기] 버튼을 찾지 못함"
+    latest = max(rows, key=lambda r: r.get("received", ""))
+    log(f"    신고내역 {len(rows)}건 — 최신 1건(접수 {latest.get('received', '?')}) "
+        "납부서 출력")
+    if not latest.get("hasSlip"):
+        log("    납부서 [보기] 버튼 없음 — 납부할 세액 없는 신고(환급 등)로 보임")
+        res.ok = True
+        res.reason = "납부서 없음 — 출력 생략"
         return res
-    if picked.get("btnsInRow", 0) < 2:
-        log("    [!] 행에 보기 버튼이 1개뿐 — 납부서 여부 불확실 (라이브 확인 필요)")
-    log(f"    신고내역 {picked['count']}건 — 최신 1건 납부서 출력: "
-        f"{picked.get('rowText', '')[:60]}")
 
     fname = render_slip_name(inp.slip_template, client.get("name", ""),
                              inp.due_date, inp.due_format)
     out = H.prepare_target(
         H.client_dir(inp, client) / f"{H.pdf_save.sanitize_filename(fname)}.pdf", log)
-    ok, err = await H.print_via_button(ctx, page, "[data-vap=slip_view]", "보기",
-                                       out, inp, log=log)
+    slip_btn = f"#{GRID}_cell_{latest['row']}_{COL_SLIP} button"
+    ok, err = await H.print_via_button(ctx, page, slip_btn, "보기", out, inp, log=log)
     if ok:
         res.outputs.append(str(out))
     res.ok = ok
