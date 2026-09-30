@@ -56,20 +56,45 @@ async def _screen_empty(page) -> bool:
         return False
 
 
-async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) -> PhaseResult:
-    def log(m):
-        emit("log", text=m)
+async def read_labeled_values(page, labels: list[str]) -> dict:
+    """화면의 '라벨 칸 → 바로 옆 칸' 값을 읽는다 (입력칸이면 value, 아니면 텍스트).
 
-    res = PhaseResult(KEY, LABEL, client_name=client.get("name", ""))
+    라벨은 공백을 무시하고 비교 — '예정고지세액 (일반)'처럼 줄바꿈이 섞여도 매칭.
+    못 찾은 라벨은 None. ('상호'를 th 옆 칸으로 읽는 방식의 일반화)
+    """
+    try:
+        return await page.evaluate(
+            """(labels) => {
+                const norm = s => (s || '').replace(/\\s+/g, '');
+                const cells = [...document.querySelectorAll('th, td')]
+                    .filter(c => c.offsetParent);
+                const out = {};
+                for (const lb of labels) {
+                    const key = norm(lb);
+                    const cell = cells.find(c => norm(c.innerText) === key);
+                    const nxt = cell && cell.nextElementSibling;
+                    if (!nxt) { out[lb] = null; continue; }
+                    const inp = nxt.querySelector('input');
+                    out[lb] = (inp ? inp.value : nxt.innerText).trim();
+                }
+                return out;
+            }""", labels)
+    except Exception:
+        return {lb: None for lb in labels}
+
+
+async def query(ctx, client: dict, inp: Inputs, rtype: str, dialogs, log):
+    """조회 조건 입력 → [조회] → 완료 감시. 인쇄 전까지의 공통 흐름.
+
+    반환 (page, state, reason) — state:
+        "ok" 조회 완료 / "bizno" 사업자번호 오류 / "no_auth" 조회권한 없음
+        / "empty" 빈 화면 응답 / "fail" 그 외 실패(reason에 사유)
+    """
     if len(client.get("bizno", "")) != 10:
-        res.reason = "사업자번호 10자리가 아님(주민번호?) — 이 화면은 사업자번호 필요"
-        return res
+        return None, "fail", "사업자번호 10자리가 아님(주민번호?) — 이 화면은 사업자번호 필요"
     page = await H.goto_url(ctx, URL, log=log, ready=SEL_YEAR)
 
     # ── ① 조회 조건 입력 ──
-    rtype = effective_report_type(client, inp)
-    if rtype != inp.report_type:
-        log(f"    신고구분(업체별): {rtype}")
     # 입력은 JS 우선 — Playwright fill/select는 스크롤을 유발해 화면이 흔들림
     try:
         if not await H.js_fill(page, SEL_YEAR, inp.year):
@@ -78,19 +103,16 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
             await page.select_option(SEL_TERM, label=f"{inp.term}기")
         radio = SEL_RADIO.get(rtype)
         if radio and not await H.check_radio(page, radio, log):
-            res.reason = "신고구분 라디오 선택 실패"
-            return res
+            return page, "fail", "신고구분 라디오 선택 실패"
         if not await H.js_fill(page, SEL_BIZNO, client.get("bizno", "")):
             await page.fill(SEL_BIZNO, client.get("bizno", ""))
     except Exception as e:
-        res.reason = f"조회 조건 입력 실패: {str(e)[:80]}"
-        return res
+        return page, "fail", f"조회 조건 입력 실패: {str(e)[:80]}"
 
     # ── ② 조회 → 완료/오류 감시 ──
     n0 = len(dialogs)
     if not await H.click_button(page, *BTN_SEARCH, log):
-        res.reason = "조회 버튼 클릭 실패"
-        return res
+        return page, "fail", "조회 버튼 클릭 실패"
 
     async def loaded() -> bool:
         t = (await page.locator(SEL_LOADED).inner_text(timeout=1500)).strip()
@@ -98,6 +120,27 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
 
     state = await H.wait_loaded_or_bizno_error(dialogs, n0, loaded,
                                                extra_keys={"no_auth": NO_AUTH_KEY})
+    if state == "timeout":
+        # 완료 신호(과세기간 칸)가 영영 안 오는 빈 응답의 예비 감지 — 주 감지는
+        # no_auth alert. 화면이 전 칸 공란이면 자료 없는 업체로 처리.
+        if await _screen_empty(page):
+            return page, "empty", ""
+        return page, "fail", "조회 결과 로딩 시간 초과(40초)"
+    return page, state, ""
+
+
+async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) -> PhaseResult:
+    def log(m):
+        emit("log", text=m)
+
+    res = PhaseResult(KEY, LABEL, client_name=client.get("name", ""))
+    rtype = effective_report_type(client, inp)
+    if rtype != inp.report_type:
+        log(f"    신고구분(업체별): {rtype}")
+    page, state, reason = await query(ctx, client, inp, rtype, dialogs, log)
+    if state == "fail":
+        res.reason = reason
+        return res
     if state == "bizno":
         res.fatal = True
         res.reason = "사업자등록번호 오류 — 홈택스: '사업자등록번호를 확인하시기 바랍니다'"
@@ -107,15 +150,10 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
         res.ok = True
         res.reason = "조회권한 없음(홈택스 알림) — 출력 생략"
         return res
-    if state == "timeout":
-        # 완료 신호(과세기간 칸)가 영영 안 오는 빈 응답의 예비 감지 — 주 감지는
-        # 위 no_auth alert. 화면이 전 칸 공란이면 자료 없는 업체로 처리.
-        if await _screen_empty(page):
-            log("    조회 응답이 빈 화면 — 통합조회 자료 없는 업체로 처리")
-            res.ok = True
-            res.reason = "통합조회 결과 없음(빈 화면) — 출력 생략"
-            return res
-        res.reason = "조회 결과 로딩 시간 초과(40초)"
+    if state == "empty":
+        log("    조회 응답이 빈 화면 — 통합조회 자료 없는 업체로 처리")
+        res.ok = True
+        res.reason = "통합조회 결과 없음(빈 화면) — 출력 생략"
         return res
 
     # 상호 읽어 확인 로그 (라벨 '상호' 옆 칸)

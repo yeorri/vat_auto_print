@@ -178,9 +178,9 @@ async def run_all(session: BrowserSession, clients: list[dict],
             f"({client.get('bizno')}) ━━━━")
 
         # 예정신고기간엔 예정신고 대상(O) 업체만 처리 — 나머지는 기록만 남기고 건너뜀
-        # (납부서 출력 모드는 신고시즌과 무관 — 스킵 규칙 미적용)
-        is_slip_mode = all(p.KEY == "payment_slip" for p in phases)
-        if (not is_slip_mode and inp.season == "예정"
+        # (납부서 출력·예정고지 조회 모드는 IGNORE_SEASON — 스킵 규칙 미적용)
+        ignores_season = all(getattr(p, "IGNORE_SEASON", False) for p in phases)
+        if (not ignores_season and inp.season == "예정"
                 and client.get("yeojung") is not True):
             log(f"[i] {client.get('name')}: 예정신고 대상 아님 — 건너뜁니다.")
             results.append(PhaseResult(
@@ -224,8 +224,11 @@ async def run_all(session: BrowserSession, clients: list[dict],
 
     if results:
         try:
-            from .report import write_results
-            xlsx = write_results(results, clients, inp)
+            from .report import write_notice_results, write_results
+            if all(p.KEY == "yejung_notice" for p in phases):
+                xlsx = write_notice_results(results, clients, inp)
+            else:
+                xlsx = write_results(results, clients, inp)
             log(f"[v] 결과 엑셀 저장: {xlsx}")
         except Exception as e:  # noqa: BLE001
             log(f"[!] 결과 엑셀 저장 실패: {e}")

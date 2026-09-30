@@ -60,3 +60,4 @@ class PhaseResult:
     reason: str = ""
     fatal: bool = False    # True면 이 업체의 남은 phase 전부 건너뜀 (예: 사업자번호 오류)
     skipped: bool = False  # fatal로 인해 실행 안 하고 건너뛴 항목
+    data: dict = field(default_factory=dict)   # 조회형 phase가 읽은 값 (예정고지 조회 등)

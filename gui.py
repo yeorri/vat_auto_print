@@ -448,14 +448,13 @@ class App:
                  bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
                  ).pack(anchor="w", padx=16, pady=(0, 12))
 
-        # ── 앱 모드 전환: 자료 출력 | 납부서 출력 ──
+        # ── 앱 모드 전환: 자료 출력 | 납부서 출력 | 예정고지 조회 ──
         modebar = tk.Frame(right, bg=BG)
         modebar.pack(fill="x", pady=(0, 10))
         Segmented(modebar, self.var_app_mode,
-                  [("data", "자료 출력"), ("slip", "납부서 출력")],
-                  BG, width=230, height=34).pack(side="left")
-        tk.Label(modebar, text="납부서: 신고내역 조회에서 업체별 납부서 PDF 저장",
-                 bg=BG, fg=MUTE, font=(FONT, 8)).pack(side="left", padx=(10, 0))
+                  [("data", "자료 출력"), ("slip", "납부서 출력"),
+                   ("notice", "예정고지 조회")],
+                  BG, width=345, height=34).pack(side="left")
 
         # ── ③ 작업 선택 ──
         c3 = self._card(right, "③ 작업 선택")
@@ -555,6 +554,35 @@ class App:
         _slip_entry(s4, self.var_outdir).pack(side="left", fill="x", expand=True,
                                               padx=(8, 6), ipady=5)
         RButton(s4, "찾아보기", self._pick_outdir, kind="mini", bg=CARD,
+                width=76, height=30, font=(FONT, 9, "bold")).pack(side="left")
+
+        # ── 예정고지 조회 카드 (notice 모드에서만 표시 — _apply_app_mode) ──
+        c6 = self._card(right, "예정고지 조회")
+        self._c6 = c6
+        tk.Label(c6, text="체크된 업체를 통합조회(신고구분 '예정')로 조회해 신고유형·"
+                          "예정고지세액을\n결과 엑셀에 정리합니다. 인쇄는 하지 않으며, "
+                          "명부의 예정신고 O/X와 상관없이 실행됩니다.\n"
+                          "과세기간은 왼쪽 ② 조회 조건의 년·기를 사용합니다.",
+                 bg=CARD, fg=INK, font=(FONT, 9), justify="left"
+                 ).pack(anchor="w", padx=16, pady=(2, 6))
+        nrow = tk.Frame(c6, bg=CARD)
+        nrow.pack(fill="x", padx=16, pady=3)
+        tk.Label(nrow, text="예정고지 조회 (조회 전용)",
+                 bg=CARD, fg=INK, font=(FONT, 10)).pack(side="left")
+        notice_pill = Pill(nrow, CARD)
+        notice_pill.pack(side="right")
+        self._phase_pills["yejung_notice"] = notice_pill
+        tk.Label(c6, text="※ 판정은 참고용 — 예정고지 대상이 사업부진·조기환급으로 "
+                          "예정신고를 선택할지는 별도로 판단하세요",
+                 bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
+                 ).pack(anchor="w", padx=16, pady=(4, 2))
+        s6 = tk.Frame(c6, bg=CARD)
+        s6.pack(fill="x", padx=16, pady=(4, 12))
+        tk.Label(s6, text="저장 폴더", bg=CARD, fg=MUTE,
+                 font=(FONT, 9)).pack(side="left")
+        _slip_entry(s6, self.var_outdir).pack(side="left", fill="x", expand=True,
+                                              padx=(8, 6), ipady=5)
+        RButton(s6, "찾아보기", self._pick_outdir, kind="mini", bg=CARD,
                 width=76, height=30, font=(FONT, 9, "bold")).pack(side="left")
 
         # ── 실행 바 ──
@@ -754,15 +782,16 @@ class App:
             self.var_outdir.set(d)
             self._refresh_validation()
 
-    # ── 앱 모드 (자료 출력 / 납부서 출력) ──
+    # ── 앱 모드 (자료 출력 / 납부서 출력 / 예정고지 조회) ──
     def _apply_app_mode(self):
-        slip = self.var_app_mode.get() == "slip"
-        if slip:
-            self._c3.pack_forget()
-            self._c4.pack_forget()
+        mode = self.var_app_mode.get()
+        for card in (self._c3, self._c4, self._c5, self._c6):
+            card.pack_forget()
+        if mode == "slip":
             self._c5.pack(fill="x", before=self._runbar)
+        elif mode == "notice":
+            self._c6.pack(fill="x", before=self._runbar)
         else:
-            self._c5.pack_forget()
             self._c3.pack(fill="x", before=self._runbar)
             self._c4.pack(fill="x", pady=(12, 0), before=self._runbar)
         self._refresh_validation()
@@ -794,6 +823,13 @@ class App:
                      and has_clients
                      and bool(self.var_outdir.get().strip())
                      and parse_due_date(self.var_due_date.get()) is not None)
+            self.btn_start.set_enabled(ready)
+            return
+        if self.var_app_mode.get() == "notice":
+            # 예정고지 조회: 체크 업체 + 저장 폴더(결과 엑셀) 필요
+            ready = (self._browsers_ready and not self._busy
+                     and has_clients
+                     and bool(self.var_outdir.get().strip()))
             self.btn_start.set_enabled(ready)
             return
         # 저장 폴더: PDF 모드이거나, 신용카드 phase(판매대행 엑셀 저장)가 켜져 있으면 필수
@@ -843,11 +879,19 @@ class App:
         if self._busy:
             return
         slip_mode = self.var_app_mode.get() == "slip"
+        notice_mode = self.var_app_mode.get() == "notice"
         clients_sel = self._checked_clients()   # 체크된 업체만 실행 대상
         if not clients_sel:
             messagebox.showwarning("업체 체크", "실행할 업체를 체크해주세요(행 클릭).")
             return
-        if slip_mode:
+        if notice_mode:
+            # 예정고지 조회 — O/X를 정하기 위한 조회라 예정신고 여부 검사 없음
+            year = self.var_year.get().strip()
+            if not (year.isdigit() and len(year) == 4):
+                messagebox.showwarning("입력 확인", "과세기간 연도(4자리)를 확인해주세요.")
+                return
+            selected = ["yejung_notice"]
+        elif slip_mode:
             # 납부서 모드 — 신고시즌·예정신고 여부와 무관, 납부기한·템플릿만 검증
             if parse_due_date(self.var_due_date.get()) is None:
                 messagebox.showwarning(
@@ -881,6 +925,12 @@ class App:
         inp = self._gather_inputs()
         if slip_mode:
             inp.output_mode = "pdf"   # 납부서는 항상 PDF 저장 (인쇄 없음)
+        if notice_mode:
+            inp.season = "예정"
+            # 인쇄가 없으니 현재 브라우저의 프린터 설정을 그대로 둔다
+            # (모드가 바뀌면 BrowserSession이 브라우저를 재시작하므로 불필요한 재시작 방지)
+            cur = self.session.output_mode if self.session else None
+            inp.output_mode = cur or "print"
         self._save_settings()
 
         self._busy = True
@@ -894,7 +944,11 @@ class App:
         self._refresh_validation()
         for pill in self._phase_pills.values():
             pill.set("idle")
-        if slip_mode:
+        if notice_mode:
+            self._append_log(
+                f"[i] 시작 — 예정고지 조회: 업체 {len(clients_sel)}곳 "
+                f"/ {inp.year}년 {inp.term}기 예정")
+        elif slip_mode:
             self._append_log(
                 f"[i] 시작 — 납부서 출력: 업체 {len(clients_sel)}곳 "
                 f"/ 납부기한 {inp.due_date}")
@@ -1020,7 +1074,7 @@ class App:
             t = "  ⚠ " + t[3:].strip()
         elif t.startswith("[v]"):
             # 색 구분: 실패=빨강(✗), 출력물 없는 생략(조회권한/납부서 없음)=노랑, 성공=초록
-            if "조회권한 없음" in t or "납부서 없음" in t:
+            if "조회권한 없음" in t or "납부서 없음" in t or "확인 불가" in t:
                 tag, mark = "warn", "✓"
             elif ": 실패" in t:
                 tag, mark = "error", "✗"
