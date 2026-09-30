@@ -24,7 +24,6 @@ from .base import Inputs, PhaseResult
 
 KEY = "payment_slip"
 LABEL = "납부서 출력"
-IGNORE_SEASON = True   # 신고시즌과 무관 — 예정기간 X 업체 건너뛰기 규칙 미적용
 
 # 신고/납부 > 세금신고 > 부가가치세 (사용자 제공 URL)
 URL = ("https://hometax.go.kr/websquare/websquare.html"

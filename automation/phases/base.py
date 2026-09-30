@@ -30,8 +30,6 @@ class Inputs:
     due_format: str = "YY.MM.DD"    # 파일명 {납부기한} 토큰 형식 (YYYY/YY/MM/DD)
     slip_template: str = "[납부서]부가가치세_{업체명}_{납부기한}"  # 파일명 템플릿
     slip_period: str = "1개월"      # 신고내역 조회기간 프리셋 (1주|1개월|3개월|6개월)
-    # ── 예정고지 조회 모드 전용 (yejung_notice) ──
-    notice_pdf: bool = False        # 통합조회 화면도 업체 폴더에 PDF로 저장 (확인용)
 
 
 def effective_report_type(client: dict, inp: Inputs) -> str:
@@ -62,4 +60,3 @@ class PhaseResult:
     reason: str = ""
     fatal: bool = False    # True면 이 업체의 남은 phase 전부 건너뜀 (예: 사업자번호 오류)
     skipped: bool = False  # fatal로 인해 실행 안 하고 건너뛴 항목
-    data: dict = field(default_factory=dict)   # 조회형 phase가 읽은 값 (예정고지 조회 등)
