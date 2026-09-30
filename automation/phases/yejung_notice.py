@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from .. import hometax as H
 from . import vat_integrated as VI
 from .base import Inputs, PhaseResult
 
@@ -99,4 +100,18 @@ async def run(ctx, client: dict, inp: Inputs, emit, dialogs, stop_check=None) ->
     res.ok = True
     res.reason = verdict
     res.data = {**fields, "판정": verdict}
+
+    # 옵션: 조회한 통합조회 화면을 업체 폴더에 PDF로 — 엑셀 값을 눈으로 대조하는 근거.
+    # 자료 출력의 통합조회 PDF와 같은 방식·같은 파일명(…_통합조회_2026년2기_예정.pdf).
+    # 저장 실패해도 조회 값은 유효하므로 결과는 성공으로 두고 경고만 남긴다.
+    if inp.notice_pdf:
+        out = H.prepare_target(
+            H.client_dir(inp, client) / f"{H.out_name(client, VI.DOC, inp)}.pdf", log)
+        ok, err = await H.print_via_button(ctx, page, *VI.BTN_PRINT, out, inp, log=log)
+        if ok:
+            res.outputs.append(str(out))
+        else:
+            log(f"[!] {client.get('name', '')}: 통합조회 PDF 저장 실패({err}) "
+                "— 조회 값은 정상")
+            res.data["PDF오류"] = f"PDF 저장 실패: {err}"
     return res

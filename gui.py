@@ -269,6 +269,7 @@ class App:
             value=s.get("slip_template", "[납부서]부가가치세_{업체명}_{납부기한}"))
         # 조회기간 UI는 제거(사용자 요청) — 업체별 사업자번호 조회라 홈택스 기본
         # (최근 1개월)이면 충분. Inputs.slip_period 기본값을 그대로 쓴다.
+        self.var_notice_pdf = tk.BooleanVar(value=s.get("notice_pdf", False))
 
         # 업체 명부 (clients.json) — 행 클릭 = 체크 토글, 체크된 업체만 실행 대상.
         # (v1.1.1에서 체크박스 부활 — 큰 명부를 유지하며 그때그때 골라 실행)
@@ -560,18 +561,26 @@ class App:
         c6 = self._card(right, "예정고지 조회")
         self._c6 = c6
         tk.Label(c6, text="체크된 업체를 통합조회(신고구분 '예정')로 조회해 신고유형·"
-                          "예정고지세액을\n결과 엑셀에 정리합니다. 인쇄는 하지 않으며, "
+                          "예정고지세액을\n결과 엑셀에 정리합니다. "
                           "명부의 예정신고 O/X와 상관없이 실행됩니다.\n"
                           "과세기간은 왼쪽 ② 조회 조건의 년·기를 사용합니다.",
                  bg=CARD, fg=INK, font=(FONT, 9), justify="left"
                  ).pack(anchor="w", padx=16, pady=(2, 6))
         nrow = tk.Frame(c6, bg=CARD)
         nrow.pack(fill="x", padx=16, pady=3)
-        tk.Label(nrow, text="예정고지 조회 (조회 전용)",
+        tk.Label(nrow, text="예정고지 조회",
                  bg=CARD, fg=INK, font=(FONT, 10)).pack(side="left")
         notice_pill = Pill(nrow, CARD)
         notice_pill.pack(side="right")
         self._phase_pills["yejung_notice"] = notice_pill
+        prow = tk.Frame(c6, bg=CARD)
+        prow.pack(fill="x", padx=16, pady=(6, 0))
+        Toggle(prow, self.var_notice_pdf, CARD).pack(side="left")
+        tk.Label(prow, text="통합조회 화면도 PDF로 저장 (업체별 폴더 — 고지세액 직접 확인용)",
+                 bg=CARD, fg=INK, font=(FONT, 9)).pack(side="left", padx=(8, 0))
+        tk.Label(c6, text="   PDF 저장 중에는 다른 프로그램 사용을 잠시 멈춰주세요 "
+                          "(세무사랑 등이 앞에 있으면 저장 창이 막힐 수 있음)",
+                 bg=CARD, fg=MUTE, font=(FONT, 8)).pack(anchor="w", padx=16)
         tk.Label(c6, text="※ 판정은 참고용 — 예정고지 대상이 사업부진·조기환급으로 "
                           "예정신고를 선택할지는 별도로 판단하세요",
                  bg=CARD, fg=MUTE, font=(FONT, 8), justify="left"
@@ -861,6 +870,7 @@ class App:
             due_date=self.var_due_date.get().strip(),
             due_format=self.var_due_format.get().strip() or "YY.MM.DD",
             slip_template=self.var_slip_template.get().strip(),
+            notice_pdf=self.var_notice_pdf.get(),
         )
 
     def _save_settings(self):
@@ -873,6 +883,7 @@ class App:
             "due_date": self.var_due_date.get().strip(),
             "due_format": self.var_due_format.get().strip() or "YY.MM.DD",
             "slip_template": self.var_slip_template.get().strip(),
+            "notice_pdf": self.var_notice_pdf.get(),
         })
 
     def _start(self):
@@ -927,10 +938,15 @@ class App:
             inp.output_mode = "pdf"   # 납부서는 항상 PDF 저장 (인쇄 없음)
         if notice_mode:
             inp.season = "예정"
-            # 인쇄가 없으니 현재 브라우저의 프린터 설정을 그대로 둔다
-            # (모드가 바뀌면 BrowserSession이 브라우저를 재시작하므로 불필요한 재시작 방지)
-            cur = self.session.output_mode if self.session else None
-            inp.output_mode = cur or "print"
+            if inp.notice_pdf:
+                # PDF 저장 — 인쇄 대상이 'PDF'여야 함 (필요하면 BrowserSession이
+                # 브라우저를 재시작해 설정. 프린터로 잘못 인쇄되는 일 방지)
+                inp.output_mode = "pdf"
+            else:
+                # 인쇄가 없으니 현재 브라우저의 프린터 설정을 그대로 둔다
+                # (모드가 바뀌면 BrowserSession이 브라우저를 재시작 — 불필요한 재시작 방지)
+                cur = self.session.output_mode if self.session else None
+                inp.output_mode = cur or "print"
         self._save_settings()
 
         self._busy = True
@@ -947,7 +963,8 @@ class App:
         if notice_mode:
             self._append_log(
                 f"[i] 시작 — 예정고지 조회: 업체 {len(clients_sel)}곳 "
-                f"/ {inp.year}년 {inp.term}기 예정")
+                f"/ {inp.year}년 {inp.term}기 예정"
+                + (" · 통합조회 PDF 저장" if inp.notice_pdf else ""))
         elif slip_mode:
             self._append_log(
                 f"[i] 시작 — 납부서 출력: 업체 {len(clients_sel)}곳 "

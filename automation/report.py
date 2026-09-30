@@ -78,7 +78,7 @@ def write_notice_results(results: list, clients: list[dict], inp) -> str:
                "사업부진·조기환급으로 예정신고를 선택할지는 별도로 판단하세요."])
     header = ["업체명", "사업자등록번호", "신고유형", "법인예정고지대상",
               "예정고지세액(일반)", "예정신고미환급세액(일반)", "예정부과세액(간이)",
-              "판정", "비고"]
+              "판정", "비고", "통합조회 PDF"]
     ws.append(header)
     bold = Font(bold=True)
     fill = PatternFill("solid", fgColor="E2E8F0")
@@ -95,14 +95,15 @@ def write_notice_results(results: list, clients: list[dict], inp) -> str:
                YN.amount(d.get(YN.F_NOTICE)), YN.amount(d.get(YN.F_UNREFUNDED)),
                YN.amount(d.get(YN.F_SIMPLE_NOTICE)),
                d.get("판정", "") if read_ok else "",
-               "" if read_ok else r.reason]
+               d.get("PDF오류", "") if read_ok else r.reason,
+               "; ".join(r.outputs)]
         ws.append(row)
         for col in (5, 6, 7):
             ws.cell(row=ws.max_row, column=col).number_format = "#,##0"
-        if not r.ok:
+        if not r.ok or d.get("PDF오류"):
             ws.cell(row=ws.max_row, column=9).font = red
 
-    for col, w in zip("ABCDEFGHI", (26, 16, 10, 14, 16, 18, 16, 36, 44)):
+    for col, w in zip("ABCDEFGHIJ", (26, 16, 10, 14, 16, 18, 16, 36, 44, 60)):
         ws.column_dimensions[col].width = w
 
     out_dir = Path(inp.output_dir) if inp.output_dir else app_data_dir()
